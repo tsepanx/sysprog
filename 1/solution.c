@@ -49,7 +49,7 @@ void sort_int_arr(struct int_arr* ia) {
     my_qsort(ia->start, 0, ia->length - 1);
 }
 
-struct int_arr arr_from_file(char* fname) {
+struct int_arr* arr_from_file(char* fname) {
     FILE* fin = fopen(fname, "r");
     if (fin == NULL) {
         fprintf(stderr, "File not found\n");
@@ -68,7 +68,9 @@ struct int_arr arr_from_file(char* fname) {
 
 //    start = realloc(start, length);
 
-    return (struct int_arr) {arr, arr_size};
+    struct int_arr* ia = malloc(sizeof(struct int_arr));
+    *ia = (struct int_arr) { arr, arr_size };
+    return ia;
 }
 
 void arr_to_file(struct int_arr* arr, char* fname) {
@@ -93,15 +95,16 @@ struct int_arr* merge_two_arrays(struct int_arr* ia1, struct int_arr* ia2) {
     int* end2 = ia2->start + ia2->length;
 
     int res_length = ia1->length + ia2->length;
-    struct int_arr result_arr = create_int_arr(res_length);
+    struct int_arr* result_arr = malloc(sizeof(struct int_arr));
+    *result_arr = create_int_arr(res_length);
 
     int i = 0;
     while (p1 < end1 || p2 < end2) {
         if ((*p1 < *p2 || p2 >= end2) && p1 < end1) {
-            result_arr.start[i] = *p1;
+            result_arr->start[i] = *p1;
             p1++;
         } else if ((*p1 >= *p2 || p1 >= end1) && p2 < end2){
-            result_arr.start[i] = *p2;
+            result_arr->start[i] = *p2;
             p2++;
         } else {
             fprintf(stderr, "Err :(");
@@ -110,7 +113,7 @@ struct int_arr* merge_two_arrays(struct int_arr* ia1, struct int_arr* ia2) {
         i++;
     }
 
-    return &result_arr;
+    return result_arr;
 }
 
 struct int_arr* multiple_ia_sort(struct int_arr** ia_arr, int size) {
@@ -124,7 +127,7 @@ struct int_arr* multiple_ia_sort(struct int_arr** ia_arr, int size) {
             struct int_arr* temp;
             temp = merge_two_arrays(result_arr, ia_arr[i]);
 
-            free(result_arr);
+//            free(result_arr);
             result_arr = temp;
         }
     }
@@ -160,6 +163,17 @@ void free_int_arr(struct int_arr* ia) {
     free(ia);
 }
 
+void print_arr(struct int_arr* arr) {
+    printf("%p %p  || ", arr, arr->start);
+    int* ptr = arr->start;
+    printf("Arr: ");
+    for (int i = 0; i < arr->length; ++i) {
+        printf("%d ", *ptr);
+        ptr++;
+    }
+    printf(" |\n");
+}
+
 int main(int argc, char **argv) {
 
     int fnames_cnt = argc - 1;
@@ -177,10 +191,11 @@ int main(int argc, char **argv) {
 		 * some names.
 		 */
 
-        struct int_arr ia_i = arr_from_file(fnames[i]);
-        ia_arr[i] = &ia_i;
+        struct int_arr* ia_i = arr_from_file(fnames[i]);
+        ia_arr[i] = ia_i;
+//        print_arr(ia_arr[i]);
 
-        coro_new(coroutine_func_f, &ia_i);
+        coro_new(coroutine_func_f, ia_i);
     }
 	/* Wait for all the coroutines to end. */
 	struct coro *c;
@@ -197,6 +212,8 @@ int main(int argc, char **argv) {
     /* All coroutines have finished. */
 
     /* IMPLEMENT MERGING OF THE SORTED ARRAYS HERE. */
+
+    printf("\n");
 
     struct int_arr* res_ia = multiple_ia_sort(ia_arr, fnames_cnt);
     arr_to_file(res_ia, "out2.txt");
