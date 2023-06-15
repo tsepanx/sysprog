@@ -71,11 +71,11 @@ struct int_arr arr_from_file(char* fname) {
     return (struct int_arr) {arr, arr_size};
 }
 
-void arr_to_file(struct int_arr arr, char* fname) {
+void arr_to_file(struct int_arr* arr, char* fname) {
     FILE* fout = fopen(fname, "w");
 
-    for (int j = 0; j < arr.length; ++j) {
-        fprintf(fout, "%d ", arr.start[j]);
+    for (int j = 0; j < arr->length; ++j) {
+        fprintf(fout, "%d ", arr->start[j]);
     }
 
     fclose(fout);
@@ -85,7 +85,7 @@ struct int_arr create_int_arr(int of_size) {
     return (struct int_arr) { .start = malloc(of_size * sizeof(int)), .length = of_size };
 }
 
-struct int_arr merge_two_arrays(struct int_arr* ia1, struct int_arr* ia2) {
+struct int_arr* merge_two_arrays(struct int_arr* ia1, struct int_arr* ia2) {
     int* p1 = ia1->start;
     int* p2 = ia2->start;
 
@@ -110,18 +110,22 @@ struct int_arr merge_two_arrays(struct int_arr* ia1, struct int_arr* ia2) {
         i++;
     }
 
-    return result_arr;
+    return &result_arr;
 }
 
-struct int_arr multiple_ia_sort(struct int_arr** ia_arr, int size) {
-    struct int_arr result_arr;
+struct int_arr* multiple_ia_sort(struct int_arr** ia_arr, int size) {
+    struct int_arr* result_arr;
 
     // TODO: Optimize to bin-tree merging
     for (int i = 0; i < size; ++i) {
         if (i == 0) {
-            result_arr = *ia_arr[i];
+            result_arr = ia_arr[i];
         } else {
-            result_arr = merge_two_arrays(&result_arr, ia_arr[i]);
+            struct int_arr* temp;
+            temp = merge_two_arrays(result_arr, ia_arr[i]);
+
+            free(result_arr);
+            result_arr = temp;
         }
     }
 
@@ -149,6 +153,11 @@ coroutine_func_f(void *arg1) {
     sort_int_arr(ia);
 
 	return 0;
+}
+
+void free_int_arr(struct int_arr* ia) {
+    free(ia->start);
+    free(ia);
 }
 
 int main(int argc, char **argv) {
@@ -189,8 +198,15 @@ int main(int argc, char **argv) {
 
     /* IMPLEMENT MERGING OF THE SORTED ARRAYS HERE. */
 
-    struct int_arr res_ia = multiple_ia_sort(ia_arr, fnames_cnt);
+    struct int_arr* res_ia = multiple_ia_sort(ia_arr, fnames_cnt);
     arr_to_file(res_ia, "out2.txt");
+
+    free_int_arr(res_ia);
+    for (int i = 0; i < fnames_cnt; ++i) { free_int_arr(ia_arr[i]); }
+
+//    clock_gettime(CLOCK_MONOTONIC, &exec_time);
+//    finish_time = exec_time.tv_sec * (uint64_t)1e9 + exec_time.tv_nsec;
+//    printf("Total time of program execution: %llu micro sec\n", (finish_time - start_time) / 1000);
 
 	return 0;
 }
