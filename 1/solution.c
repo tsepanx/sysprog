@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "libcoro.h"
 
 #define MAX_SIZE 10000
@@ -10,7 +11,24 @@ struct int_arr {
     int length;
 };
 
-void my_qsort(int* arr, int i_start, int i_end) {
+struct coro_args {
+    char* name;
+    struct int_arr* ia;
+//    unsigned long* run_time;
+};
+
+unsigned long nsec(struct timespec ts) {
+    return ts.tv_sec * (unsigned) 1e9 + ts.tv_nsec;
+}
+
+unsigned long get_cur_time() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    return nsec(ts);
+}
+
+void my_qsort(int* arr, int i_start, int i_end, unsigned long* t_hold) {
     int m = arr[(i_end + i_start) / 2];
 
     int i = i_start;
@@ -33,20 +51,27 @@ void my_qsort(int* arr, int i_start, int i_end) {
             i++;
             j--;
 
+            size_t t1 = get_cur_time();
+
             coro_yield(); // Yield here
+
+            size_t t2 = get_cur_time();
+            size_t diff = t2 - t1;
+
+            *t_hold += diff;
         }
     } while (i <= j);
 
     if (j > i_start) {
-        my_qsort(arr, i_start, j);
+        my_qsort(arr, i_start, j, t_hold);
     }
     if (i < i_end) {
-        my_qsort(arr, i, i_end);
+        my_qsort(arr, i, i_end, t_hold);
     }
 }
 
-void sort_int_arr(struct int_arr* ia) {
-    my_qsort(ia->start, 0, ia->length - 1);
+void sort_int_arr(struct int_arr* ia, unsigned long* t_hold) {
+    my_qsort(ia->start, 0, ia->length - 1, t_hold);
 }
 
 struct int_arr* arr_from_file(char* fname) {
@@ -79,6 +104,7 @@ void arr_to_file(struct int_arr* arr, char* fname) {
     for (int j = 0; j < arr->length; ++j) {
         fprintf(fout, "%d ", arr->start[j]);
     }
+    fprintf(fout, "\n");
 
     fclose(fout);
 }
@@ -107,7 +133,7 @@ struct int_arr* merge_two_arrays(struct int_arr* ia1, struct int_arr* ia2) {
             result_arr->start[i] = *p2;
             p2++;
         } else {
-            fprintf(stderr, "Err :(");
+            fprintf(stderr, "Err :(\n");
             exit(-1);
         }
         i++;
@@ -124,36 +150,34 @@ struct int_arr* multiple_ia_sort(struct int_arr** ia_arr, int size) {
         if (i == 0) {
             result_arr = ia_arr[i];
         } else {
-            struct int_arr* temp;
-            temp = merge_two_arrays(result_arr, ia_arr[i]);
-
-//            free(result_arr);
-            result_arr = temp;
+            result_arr = merge_two_arrays(result_arr, ia_arr[i]);
         }
     }
 
     return result_arr;
 }
 
+static int coroutine_func_f(void *arg1) {
+    struct coro_args* ca = arg1;
+    struct int_arr* ia = ca->ia;
+    char* coro_name = ca->name;
 
-/**
- * You can compile and run this code using the commands:
- *
- * $> gcc solution.c libcoro.c
- * $> ./a.out
- */
+    free(ca);
 
+    unsigned long t_start = get_cur_time();
+    unsigned long* t_hold = malloc(sizeof(unsigned long));
+    *t_hold = 0;
+//    unsigned long t_hold = get_cur_time();
 
-/**
- * Coroutine body. This code is executed by all the coroutines. Here you
- * implement your solution, sort each individual file.
- */
-static int
-coroutine_func_f(void *arg1) {
-    struct int_arr* ia = arg1;
+    /* IMPLEMENT SORTING OF INDIVIDUAL FILES HERE. */
+    sort_int_arr(ia, t_hold);
 
-	/* IMPLEMENT SORTING OF INDIVIDUAL FILES HERE. */
-    sort_int_arr(ia);
+    size_t exec_time = get_cur_time() - t_start - *t_hold;
+
+    struct coro* this = coro_this();
+    printf("Coro %s t_hold: %f sec\n", coro_name, (double) *t_hold / 1e9);
+    printf("Coro %s exec_time: %f sec\n", coro_name, (double) exec_time / 1e9);
+    printf("Coro %s switch count: %lld\n", coro_name, coro_switch_count(this));
 
 	return 0;
 }
@@ -175,6 +199,12 @@ void print_arr(struct int_arr* arr) {
 }
 
 int main(int argc, char **argv) {
+    unsigned long start_time;
+
+    struct timespec exec_time;
+    clock_gettime(CLOCK_MONOTONIC, &exec_time);
+
+    start_time = get_cur_time();
 
     int fnames_cnt = argc - 1;
     char** fnames = ++argv;
@@ -193,9 +223,14 @@ int main(int argc, char **argv) {
 
         struct int_arr* ia_i = arr_from_file(fnames[i]);
         ia_arr[i] = ia_i;
-//        print_arr(ia_arr[i]);
 
-        coro_new(coroutine_func_f, ia_i);
+//        print_arr(ia_i);
+
+        struct coro_args* ca_i = malloc(sizeof(struct coro_args));
+        ca_i->ia = ia_i;
+        ca_i->name = fnames[i];
+
+        coro_new(coroutine_func_f, ca_i);
     }
 	/* Wait for all the coroutines to end. */
 	struct coro *c;
@@ -213,17 +248,20 @@ int main(int argc, char **argv) {
 
     /* IMPLEMENT MERGING OF THE SORTED ARRAYS HERE. */
 
-    printf("\n");
-
     struct int_arr* res_ia = multiple_ia_sort(ia_arr, fnames_cnt);
-    arr_to_file(res_ia, "out2.txt");
+
+    arr_to_file(res_ia, "out1.txt");
 
     free_int_arr(res_ia);
     for (int i = 0; i < fnames_cnt; ++i) { free_int_arr(ia_arr[i]); }
 
-//    clock_gettime(CLOCK_MONOTONIC, &exec_time);
-//    finish_time = exec_time.tv_sec * (uint64_t)1e9 + exec_time.tv_nsec;
-//    printf("Total time of program execution: %llu micro sec\n", (finish_time - start_time) / 1000);
+    unsigned long finish_time;
+
+    clock_gettime(CLOCK_MONOTONIC, &exec_time);
+    finish_time = get_cur_time();
+
+    double seconds = (double) (finish_time - start_time) / 1e9;
+    printf("Overall execution time: %f sec\n", seconds);
 
 	return 0;
 }

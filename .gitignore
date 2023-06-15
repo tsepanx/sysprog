@@ -2,6 +2,7 @@ a
 b
 c
 main
+test*
 
 *.out
 *.txt
