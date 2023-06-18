@@ -4,6 +4,8 @@
 #include <time.h>
 #include "libcoro.h"
 
+#define OUT_FNAME "out1.txt"
+
 struct int_arr {
     int* start;
     int length;
@@ -159,8 +161,6 @@ struct int_arr* merge_two_arrays(struct int_arr* ia1, struct int_arr* ia2) {
 }
 
 void free_int_arr(struct int_arr* ia) {
-    print_arr(ia);
-
     free(ia->start);
     free(ia);
 }
@@ -238,11 +238,15 @@ int main(int argc, char **argv) {
         struct int_arr* ia_i = malloc(sizeof(struct int_arr));
         int res_read = arr_from_file(fnames[i], ia_i);
         if (res_read == -1) {
-            exit(-1);
+            for (int j = 0; j < i; ++j) {
+                free_int_arr(ia_arr[j]);
+                free(ca_arr[j]);
+            }
+            free(ia_arr);
+            free(ia_i);
+            return -1;
         }
         ia_arr[i] = ia_i;
-
-//        print_arr(ia_i);
 
         struct coro_args* ca_i = malloc(sizeof(struct coro_args));
         ca_i->ia = ia_i;
@@ -274,10 +278,10 @@ int main(int argc, char **argv) {
 
     if (fnames_cnt > 1) {
         struct int_arr* res_ia = multiple_ia_sort(ia_arr, fnames_cnt);
-        arr_to_file(res_ia, "out1.txt");
+        arr_to_file(res_ia, OUT_FNAME);
         free_int_arr(res_ia);
     } else {
-        arr_to_file(ia_arr[0], "out1.txt");
+        arr_to_file(ia_arr[0], OUT_FNAME);
     }
 
     for (int i = 0; i < fnames_cnt; ++i) {
