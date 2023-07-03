@@ -1,9 +1,7 @@
 
 #include <string.h>
 #include <malloc.h>
-//#include <unistd.h>
 #include <stdlib.h>
-//#include <errno.h>
 
 #define SPACE ' '
 #define BAR '|'
@@ -12,17 +10,29 @@
 #define QUOTE_2 '\"'
 #define BACKSLASH '\\'
 
+enum bool {
+    true = 1,
+    false = 0
+};
 
 struct string_ends {
     char* l;
     char* r; // Right after last element
-    char asdf[111111];
 };
+
+//enum cmd_out_redir {
+//    STDOUT = 0,
+//    PIPE = 1,
+//    FILE_WRT = 2,
+//    FILE_APP = 3
+//};
 
 struct cmd {
     struct string_ends name;
-    struct string_ends* argv;
+//    struct string_ends* argv;
+    char** argv;
     int argc;
+//    enum cmd_out_redir;
 };
 
 struct cmd_list {
@@ -32,6 +42,14 @@ struct cmd_list {
 
 int se_size(struct string_ends* se) {
     return (int) (se->r - se->l);
+}
+
+char* se_dup(struct string_ends se) {
+    int size = se_size(&se);
+
+    char* dest = calloc(size, sizeof(char));
+    memcpy(dest, se.l, size);
+    return dest;
 }
 
 void strip_l(char** l) {
@@ -51,11 +69,6 @@ void strip_se(struct string_ends* se) {
     strip(&se->l, &se->r);
 }
 
-enum bool {
-    true = 1,
-    false = 0
-};
-
 enum bool is_quote(const char* it) {
     return *it == QUOTE_1 || *it == QUOTE_2;
 }
@@ -69,8 +82,9 @@ enum bool is_cmd_delim(const char* it) {
 }
 
 
-int parse_args(struct string_ends* args_string, struct string_ends** args_list_out) {
-    struct string_ends* args_list = malloc(1 * sizeof(struct string_ends));
+int parse_args(struct string_ends* args_string, char*** args_list_out) {
+    char** args_list = malloc(1 * sizeof(char*));
+//    struct string_ends* args_list = malloc(1 * sizeof(struct string_ends));
     int args_cnt = 0;
 
     char* iter = args_string->l;
@@ -83,12 +97,15 @@ int parse_args(struct string_ends* args_string, struct string_ends** args_list_o
             in_quotes = !in_quotes;
         }
         if (!in_quotes && is_space_delim(iter)) { // ' ', '\n'
-            args_list[args_cnt].l = iter_save;
-            args_list[args_cnt].r = iter;
+//            args_list[args_cnt].l = iter_save;
+//            args_list[args_cnt].r = iter;
+            args_list[args_cnt] = se_dup((struct string_ends) {.l = iter_save, .r = iter});
             args_cnt++;
 
-            void * new_ptr = realloc(args_list, (args_cnt + 1) * sizeof(struct string_ends));
+//            void * new_ptr = realloc(args_list, (args_cnt + 1) * sizeof(struct string_ends));
+            void * new_ptr = realloc(args_list, (args_cnt + 1) * sizeof(char *));
             if (new_ptr != NULL) { args_list = new_ptr; }
+
             strip_l(&iter);
             iter_save = iter;
         }
@@ -167,7 +184,8 @@ void print_cmd(struct cmd c) {
     printf("\nARGC: %d\n", c.argc);
     for (int i = 0; i < c.argc; ++i) {
         printf("ARG {%d}: \"", i);
-        print_se(&c.argv[i]);
+//        print_se(&c.argv[i]);
+        printf("%s", c.argv[i]);
         printf("\"\n");
     }
     printf("--- END CMD ---\n");
@@ -224,6 +242,9 @@ char* read_line() {
 void free_cmds(struct cmd_list* cmds) {
     for (int i = 0; i < cmds->size; ++i) {
         struct cmd* a = &cmds->start[i];
+        for (int j = 0; j < a->argc; ++j) {
+            free(a->argv[j]);
+        }
         free(a->argv);
     }
     free(cmds->start);
@@ -236,6 +257,18 @@ int main() {
 
     struct cmd_list c_list = parse_line(s_in);
     print_cmds(c_list);
+
+//    pid_t proc = fork();
+//    if (proc < 0) {
+//        fprintf(stderr, "Fork failed\n");
+//    } else if (proc == 0) {
+//        struct cmd cmd1 = c_list.start[0];
+////        se_dup(cmd1.argv)
+//    } else {
+//
+//    }
+
+    // ----------
 
     free_cmds(&c_list);
     free(s_in);
