@@ -3,6 +3,8 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/wait.h>
 
 #define SPACE ' '
 #define BAR '|'
@@ -85,9 +87,11 @@ enum bool is_cmd_delim(const char* it) {
 
 
 int parse_args(struct string_ends* args_string, char*** args_list_out) {
-    char** args_list = malloc(1 * sizeof(char*));
+    char** args_list = malloc(2 * sizeof(char*));
 //    struct string_ends* args_list = malloc(1 * sizeof(struct string_ends));
-    int args_cnt = 0;
+
+    args_list[0] = malloc(1); *args_list[0] = ' ';
+    int args_cnt = 1;
 
     char* iter = args_string->l;
     char* iter_save = iter;
@@ -263,15 +267,33 @@ int main() {
     struct cmd_list c_list = parse_line(s_in);
     print_cmds(c_list);
 
+    int to_parent[2];
+    pipe(to_parent);
+
+
     pid_t proc = fork();
     if (proc < 0) {
         fprintf(stderr, "Fork failed\n");
     } else if (proc == 0) {
-        struct cmd cmd1 = c_list.start[0];
-//        se_dup(cmd1.name, cmd1.argv);
-        execv(cmd1.name, cmd1.argv);
-    } else {
+        close(to_parent[0]);
+        dup2(to_parent[1], STDOUT_FILENO);
 
+        struct cmd cmd1 = c_list.start[0];
+        execvp(cmd1.name, cmd1.argv);
+        fprintf(stderr, "my-shell: %s: %s\n", strerror(errno), cmd1.name);
+        exit(1);
+    } else {
+        close(to_parent[1]);
+        wait(NULL);
+
+        int out_fd = STDOUT_FILENO;
+        char buff[128];
+        size_t count = read(to_parent[0], buff, sizeof(buff));
+
+        while (count > 0) {
+            write(out_fd, buff, count);
+            count = read(to_parent[0], buff, sizeof(buff));
+        }
     }
 
     // ----------
