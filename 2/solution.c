@@ -2,6 +2,7 @@
 #include <string.h>
 #include <malloc.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #define SPACE ' '
 #define BAR '|'
@@ -28,7 +29,8 @@ struct string_ends {
 //};
 
 struct cmd {
-    struct string_ends name;
+//    struct string_ends name;
+    char* name;
 //    struct string_ends* argv;
     char** argv;
     int argc;
@@ -126,7 +128,7 @@ struct cmd parse_exec(struct string_ends* exec_string) {
         iter++;
     }
 
-    res_obj.name = (struct string_ends) { .l = iter_save, .r = iter };
+    res_obj.name = se_dup((struct string_ends) { .l = iter_save, .r = iter });
 
     strip_l(&iter); // Gap between 'name' and 'args123...'
 
@@ -180,7 +182,9 @@ void print_se(struct string_ends* se) {
 
 void print_cmd(struct cmd c) {
     printf("--- CMD ---\n");
-    printf("NAME: "); print_se(&c.name);
+    printf("NAME: ");
+//    print_se(&c.name);
+    printf("%s", c.name);
     printf("\nARGC: %d\n", c.argc);
     for (int i = 0; i < c.argc; ++i) {
         printf("ARG {%d}: \"", i);
@@ -245,6 +249,7 @@ void free_cmds(struct cmd_list* cmds) {
         for (int j = 0; j < a->argc; ++j) {
             free(a->argv[j]);
         }
+        free(a->name);
         free(a->argv);
     }
     free(cmds->start);
@@ -258,15 +263,16 @@ int main() {
     struct cmd_list c_list = parse_line(s_in);
     print_cmds(c_list);
 
-//    pid_t proc = fork();
-//    if (proc < 0) {
-//        fprintf(stderr, "Fork failed\n");
-//    } else if (proc == 0) {
-//        struct cmd cmd1 = c_list.start[0];
-////        se_dup(cmd1.argv)
-//    } else {
-//
-//    }
+    pid_t proc = fork();
+    if (proc < 0) {
+        fprintf(stderr, "Fork failed\n");
+    } else if (proc == 0) {
+        struct cmd cmd1 = c_list.start[0];
+//        se_dup(cmd1.name, cmd1.argv);
+        execv(cmd1.name, cmd1.argv);
+    } else {
+
+    }
 
     // ----------
 
