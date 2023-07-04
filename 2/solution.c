@@ -5,8 +5,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/wait.h>
-#include <fcntl.h>
-#include <assert.h>
 
 #define SPACE ' '
 #define BAR '|'
@@ -32,10 +30,9 @@ enum cmd_out_redir {
     FILE_APP = 3
 };
 
-struct cmd {
 //    struct string_ends name;
+struct cmd {
     char* name;
-//    struct string_ends* argv;
     char** argv;
     int argc;
     enum cmd_out_redir redir_sign;
@@ -53,27 +50,34 @@ int se_size(struct string_ends* se) {
 char* se_dup(struct string_ends se) {
     int size = se_size(&se);
 
-    char* dest = calloc(size, sizeof(char));
+    char* dest = malloc((size + 1) * sizeof(char));
     memcpy(dest, se.l, size);
+    dest[size] = '\0';
+
     return dest;
 }
 
-void strip_l(char** l) {
-    while ((*l)[0] == SPACE) { (*l)++; }
+void strip_l(char** l, char ch) {
+    while ((*l)[0] == ch) { (*l)++; }
 }
 
-void strip_r(char** r) {
-    while ((*r)[0] == SPACE && (*r)[-1] == SPACE) { (*r)--; }
+void strip_r(char** r, char ch) {
+    while ((*r)[0] == ch && (*r)[-1] == ch) { (*r)--; }
 }
 
-void strip(char** l, char** r) {
-    strip_l(l);
-    strip_r(r);
+void strip(char** l, char** r, char ch) {
+    strip_l(l, ch);
+    strip_r(r, ch);
 }
 
-void strip_se(struct string_ends* se) {
-    strip(&se->l, &se->r);
+void strip_se_ch(struct string_ends* se, char ch) {
+    strip(&se->l, &se->r, ch);
 }
+
+void strip_se_space(struct string_ends* se) {
+    strip_se_ch(se, SPACE);
+}
+
 
 enum bool is_quote(const char* it) {
     return *it == QUOTE_1 || *it == QUOTE_2;
@@ -103,36 +107,54 @@ enum cmd_out_redir delim_type(const char* it) {
 
 int parse_args(struct string_ends* args_string, char*** args_list_out) {
     char** args_list = malloc(2 * sizeof(char*));
-//    struct string_ends* args_list = malloc(1 * sizeof(struct string_ends));
 
-    args_list[0] = malloc(1); *args_list[0] = ' ';
+    args_list[0] = malloc(2);
+    strcpy(args_list[0], " ");
+
     int args_cnt = 1;
+
+    if (se_size(args_string) == 0) {
+        args_list[args_cnt] = NULL;
+        *args_list_out = args_list;
+        return args_cnt;
+    }
 
     char* iter = args_string->l;
     char* iter_save = iter;
 
-    int in_quotes = 0;
+    int in_quotes_2 = 0;
 
     while (iter <= args_string->r) {
-        if (!in_quotes && (is_space_delim(iter) || is_cmd_delim(iter) || is_quote(iter)) && (iter > iter_save)) { // ' ', '\n'
-//            args_list[args_cnt].l = iter_save;
-//            args_list[args_cnt].r = iter;
-            args_list[args_cnt] = se_dup((struct string_ends) {.l = iter_save, .r = iter});
+
+        // TODO Add quote_1 support
+        int end_of_quote_arg = in_quotes_2 && (*iter == QUOTE_2);
+        int end_of_arg = !in_quotes_2 && (is_space_delim(iter) || is_cmd_delim(iter) || is_quote(iter));
+        if ((end_of_quote_arg || end_of_arg) && (iter > iter_save)) { // ' ', '\n'
+            struct string_ends se_arg = (struct string_ends) {.l = iter_save, .r = iter};
+
+            if (*iter == QUOTE_1) {
+                strip_se_ch(&se_arg, QUOTE_1);
+                iter++;
+            } else if (*iter == QUOTE_2) {
+                strip_se_ch(&se_arg, QUOTE_2);
+                iter++;
+            }
+            args_list[args_cnt] = se_dup(se_arg );
             args_cnt++;
 
-//            void * new_ptr = realloc(args_list, (args_cnt + 1) * sizeof(struct string_ends));
             void * new_ptr = realloc(args_list, (args_cnt + 1) * sizeof(char *));
             if (new_ptr != NULL) { args_list = new_ptr; }
 
-            strip_l(&iter);
+            strip_l(&iter, SPACE);
             iter_save = iter;
         }
-        if (is_quote(iter)) { // "
-            in_quotes = !in_quotes;
+        if (*iter == QUOTE_2) { // "
+            in_quotes_2 = !in_quotes_2;
         }
         iter++;
     }
 
+    args_list[args_cnt] = NULL;
     *args_list_out = args_list; // TODO WHY?
     return args_cnt;
 }
@@ -149,13 +171,12 @@ struct cmd parse_exec(struct string_ends* exec_string) {
 
     res_obj.name = se_dup((struct string_ends) { .l = iter_save, .r = iter });
 
-    strip_l(&iter); // Gap between 'name' and 'args123...'
+    strip_l(&iter, SPACE); // Gap between 'name' and 'args123...'
 
     struct string_ends args_string = (struct string_ends) { .l = iter, .r = exec_string->r };
-    strip_se(&args_string);
+    strip_se_space(&args_string);
 
     int argc = parse_args(&args_string, &res_obj.argv);
-
     res_obj.argc = argc;
 
     return res_obj;
@@ -172,15 +193,13 @@ struct cmd_list parse_line(char* s) {
 
     while (*it) {
         if (is_quote(it)) { in_quotes = !in_quotes; }
-        if (is_cmd_delim(it) && !in_quotes) {
+        if (is_cmd_delim(it) && !in_quotes && (iter_save != it)) {
             enum cmd_out_redir redir_sign = delim_type(it);
             struct string_ends exec_string = (struct string_ends) { .l = iter_save, .r = it };
-//            it++;
-//            *it = ' ';
             iter_save = it + 1;
             it++;
 
-            strip_se(&exec_string);
+            strip_se_space(&exec_string);
 
             void * tmp_ptr = realloc(result_commands, (cmd_cnt + 1) * sizeof(struct cmd));
             if (tmp_ptr != NULL) { result_commands = tmp_ptr; }
@@ -226,15 +245,14 @@ void print_cmds(struct cmd_list cl) {
     }
 }
 
-char* read_line(FILE* stream) {
+char* read_line(FILE* stream, enum bool* is_eof) {
     int s_size = 0;
-    char *raw_line = malloc(s_size * sizeof(char));
+    char *raw_line = calloc(s_size, sizeof(char));
     char it, prev = 0;
 
     enum bool in_quotes = false;
     int i = 0;
-    while (true)
-    {
+    while (true) {
         it = getc(stream);
         if (is_quote(&it)) { in_quotes = !in_quotes; }
         if (!in_quotes && prev == BACKSLASH && it == LINE_BREAK) {
@@ -243,14 +261,18 @@ char* read_line(FILE* stream) {
 
 
             raw_line[i - 1] = it;
-            if (it == EOF || it == LINE_BREAK) {
+            if (it == LINE_BREAK) {
                 raw_line[i - 1] = ' ';
                 break;
             }
 
             continue;
         }
-        else if (it == EOF || it == LINE_BREAK) break;
+        else if (it == LINE_BREAK) break;
+        else if (it == EOF) {
+            *is_eof = true;
+            break;
+        }
 
         s_size++;
         void* tmp_ptr = realloc(raw_line, sizeof(char) * s_size);
@@ -261,7 +283,10 @@ char* read_line(FILE* stream) {
         i++;
     }
 
+    void* tmp_ptr = realloc(raw_line, sizeof(char) * (s_size + 1));
+    if (tmp_ptr != NULL) { raw_line = tmp_ptr; }
     raw_line[i] = ';';
+    raw_line[i + 1] = '\0';
 
     return raw_line;
 }
@@ -278,148 +303,36 @@ void free_cmds(struct cmd_list* cmds) {
     free(cmds->start);
 }
 
-int post_process1(struct cmd_list c_list) {
-//    int prev_pipe[2];
-    int prev_out_fd = 0;
-    int cur_pipe[2];
-    int children[c_list.size];
+int process_pipes(struct cmd_list c_list) {
+    int pids[c_list.size];
 
-    for (int i = 0; i < c_list.size; ++i) {
-//        printf("%s: %d\n", c_list.start[i].name, c_list.start[i].redir_sign);
+    int pipe_start[2];
+    int pipe_end[2];
 
-//        int procs_fd[c_list.size];
-
-//        int prev_out_fd = 0;
-
-//        if (i > 0) {
-//            prev_pipe[0] = cur_pipe[0];
-//            prev_pipe[1] = cur_pipe[1];
-//        }
-        pipe(cur_pipe);
-
-//        pipe(prev_pipe);
-//        pipe(cur_pipe);
-
-        pid_t proc = fork();
-        if (proc < 0) {
-            fprintf(stderr, "Fork failed\n");
-        } else if (proc == 0) { // CHILD
-            close(cur_pipe[0]);
-            if (i < c_list.size - 1) {
-                if (c_list.start[i].redir_sign != STDOUT) {
-                    dup2(cur_pipe[1], STDOUT_FILENO);
-                }
-            }
-
-            if (i > 0) {
-                if (prev_out_fd != 0) {
-                    dup2(prev_out_fd, STDIN_FILENO);
-                }
-//                } else {
-//                    fprintf(stderr, "%d: Wrong prev_pipe[0]\n", i);
-//                }
-            }
-
-            struct cmd cmd_cur = c_list.start[i];
-            fprintf(stderr, "NAME: %s\n", cmd_cur.name);
-            execvp(cmd_cur.name, cmd_cur.argv);
-            fprintf(stderr, "my-shell: %s: %s\n", strerror(errno), cmd_cur.name);
-
-            return -1;
-        } else { // PARENT
-            children[i] = proc;
-
-            close(cur_pipe[1]);
-
-            if (i > 0) {
-
-            }
-
-            if (i < c_list.size - 1) {
-                if (c_list.start[i].redir_sign == PIPE) {
-                    prev_out_fd = cur_pipe[0];
-                } else if (c_list.start[i].redir_sign == STDOUT) {
-                    prev_out_fd = 0;
-                    printf("TO STDOUT: %d", cur_pipe[0]);
-//                    dup2(cur_pipe[0], STDOUT_FILENO);
-                } else if (c_list.start[i].redir_sign == FILE_WRT) {
-                    int fd_fout = open(c_list.start[i + 1].name, O_WRONLY);
-                    dup2(cur_pipe[0], fd_fout);
-                }
-                printf("%d: %d\n", i, prev_out_fd);
-            }
-//                wait(NULL);
-
-//                int out_fd = STDOUT_FILENO;
-//                char buff[128];
-//                size_t count = read(cur_pipe[0], buff, sizeof(buff));
-//
-//                while (count > 0) {
-//                    write(out_fd, buff, count);
-//                    count = read(cur_pipe[0], buff, sizeof(buff));
-//                }
-        }
+    if (c_list.size > 1)
+    {
+        pipe(pipe_start);
     }
 
-    int code;
-    int final_exit_code;
     for (int i = 0; i < c_list.size; ++i) {
-        assert(waitpid(children[i], &code, 0) >= 0);
-        printf("code: %d\n", code);
-
-        if (WIFEXITED(code)) {
-            final_exit_code &= WEXITSTATUS(code);
-        } else if (WIFSIGNALED(code)) {
-            final_exit_code = EXIT_FAILURE;
+        if (i < c_list.size - 1) {
+            pipe(pipe_end);
         }
-    }
 
-    return final_exit_code;
+        pids[i] = fork();
 
-    // TODO
-    // ~~TODO 1) Add cmd_out_redir~~
-    // TODO 2) Reidrect from one child to next (by chain)
-    // TODO 3) Ability to write to files
-
-
-}
-
-int post_process(struct cmd_list c_list) {
-    int children[c_list.size];
-
-    int parent_write[2];
-    int child_write[2];
-    pipe(parent_write);
-    pipe(child_write);
-
-    pid_t proc = fork();
-
-//    int i = 0;
-    for (int i = 0; i < c_list.size; ++i) {
-
-        if (proc < 0) {
+        if (pids[i] < 0) {
             fprintf(stderr, "FORK() BROKEN\n");
             return -1;
         }
-        if (proc == 0) { // CHILD
-//        printf("CHILD\n");
-
-//        close(parent_write[1]);
-//        close(child_write[0]);
-//
-//        dup2(parent_write[0], STDIN_FILENO);
-//        dup2(child_write[1], STDOUT_FILENO);
-//
-//        close(parent_write[0]);
-//        close(child_write[1]);
-
+        if (pids[i] == 0) { // CHILD
             if (i > 0) {
                 dup2(pipe_start[0], STDIN_FILENO);
                 close(pipe_start[0]);
                 close(pipe_start[1]);
             }
 
-            if (i != c_list.size - 1) {
+            if (i < c_list.size - 1) {
                 close(pipe_end[0]);
                 dup2(pipe_end[1], STDOUT_FILENO);
                 close(pipe_end[1]);
@@ -428,60 +341,70 @@ int post_process(struct cmd_list c_list) {
             struct cmd cmd_cur = c_list.start[i];
 
             execvp(cmd_cur.name, cmd_cur.argv);
-            fprintf(stderr, "my-shell: %s: %s\n", strerror(errno), cmd_cur.name);
+            fprintf(stderr, "my-shell: %s: %s\n", cmd_cur.name, strerror(errno));
             return errno;
         } else { // PARENT
-            printf("PARENT: %d\n", proc);
+            if (i > 0) {
+                close(pipe_start[0]);
+                close(pipe_start[1]);
+            }
 
-            close(parent_write[0]);
-            close(child_write[1]);
-
-//        dup2(parent_write[1], STDIN_FILENO);
-//        dup2(parent_write[1], STDOUT_FILENO);
-
-            int prev_proc_out_fd = child_write[0];
-
-//        char* parent_input = read_line(stdin);
-
-//        write(parent_write[1], parent_input, sizeof(parent_input));
-//        free(parent_input);
-
-//        wait(NULL);
-
-            char buf[128];
-            unsigned count;
-            while ((count = read(prev_proc_out_fd, buf, sizeof(buf))) > 0) {
-                fprintf(stderr, "CHUNK (size %d): %s\n---\n", count, buf);
+            if (i < c_list.size - 1) {
+                pipe_start[0] = pipe_end[0];
+                pipe_start[1] = pipe_end[1];
             }
         }
 
     }
 
-    return 0;
+    if (c_list.size > 1) {
+        close(pipe_start[0]);
+        close(pipe_start[1]);
+    } else {
+        return 0;
+    }
+
+    int res_status;
+    for (int i = 0; i < c_list.size; i++) {
+        int status;
+        waitpid(pids[i], &status, 0);
+
+        if (WIFEXITED(status)) {
+            res_status = WEXITSTATUS(status);
+        } else if (WIFSIGNALED(status)) {
+            res_status = EXIT_FAILURE;
+        }
+    }
+
+    return res_status;
     // TODO
     // ~~TODO 1) Add cmd_out_redir~~
-    // TODO 2) Reidrect from one child to next (by chain)
+    // ~~TODO 2) Reidrect from one child to next (by chain)~~
     // TODO 3) Ability to write to files
-
-
 }
 
 
 int main() {
-    char* s_in = read_line(stdin);
+    while (true) {
+        enum bool is_eof = false;
 
-    printf("string: \'%s\'\n", s_in);
+        char* s_in = read_line(stdin, &is_eof);
 
-    struct cmd_list c_list = parse_line(s_in);
-    print_cmds(c_list);
+        if (is_eof) {
+            free(s_in);
+            break;
+        }
 
-    int result = post_process(c_list);
+//        printf("string: \'%s\'\n", s_in);
+        struct cmd_list c_list = parse_line(s_in);
+//        print_cmds(c_list);
 
-    free_cmds(&c_list);
-    free(s_in);
+        int result = process_pipes(c_list);
+
+        free_cmds(&c_list);
+        free(s_in);
+    }
 
     fclose(stdin);
-
-    return result;
 }
 
