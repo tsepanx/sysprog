@@ -31,7 +31,6 @@ enum cmd_out_redir {
     FILE_APP = 3
 };
 
-//    struct string_ends name;
 struct cmd {
     char* name;
     char** argv;
@@ -109,7 +108,6 @@ enum cmd_out_redir delim_type(const char* it) {
     }
     return -1;
 }
-
 
 int parse_args(struct string_ends* args_string, char*** args_list_out) {
     char** args_list = malloc(2 * sizeof(char*));
@@ -284,16 +282,16 @@ char* read_line(FILE* stream, enum bool* is_eof) {
     while (true) {
         it = getc(stream);
         if (is_quote(&it)) { in_quotes = !in_quotes; }
-        if (!in_quotes && prev == BACKSLASH && it == LINE_BREAK) {
+        if (prev == BACKSLASH && it == LINE_BREAK) {
             prev = it;
             it = getc(stream);
-
-
             raw_line[i - 1] = it;
-            if (it == LINE_BREAK) {
-                raw_line[i - 1] = ' ';
-                break;
-            }
+
+            // TODO Why?
+//            if (it == LINE_BREAK) {
+//                raw_line[i - 1] = ' ';
+//                break;
+//            }
 
             continue;
         }
@@ -333,7 +331,7 @@ void free_cmds(struct cmd_list* cmds) {
     free(cmds->start);
 }
 
-int process_pipes(struct cmd_list c_list) {
+int process_pipes(struct cmd_list c_list, enum bool *exit) {
     int pids[c_list.size];
 
     int pipe_start[2];
@@ -358,15 +356,21 @@ int process_pipes(struct cmd_list c_list) {
             }
             continue;
         }
-        else if (strcmp(cmd_cur.name, "exit") == 0 && c_list.size == 1) {
-            int code;
-            if (cmd_cur.argc > 1) {
-                code = atol(cmd_cur.argv[1]);
+        else if (strcmp(cmd_cur.name, "exit") == 0) {
+            if (c_list.size == 1) {
+
+                int code;
+                if (cmd_cur.argc > 1) {
+                    code = atol(cmd_cur.argv[1]);
+                }
+                else {
+                    code = 0;
+                }
+                *exit = true;
+                return code;
+            } else {
+                continue;
             }
-            else {
-                code = 0;
-            }
-            exit(code);
         }
 
         pids[i] = fork();
@@ -435,24 +439,26 @@ int process_pipes(struct cmd_list c_list) {
 
 
 int main() {
+    enum bool exit = false;
     while (true) {
-        enum bool is_eof = false;
 
-        char* s_in = read_line(stdin, &is_eof);
+        char* s_in = read_line(stdin, &exit);
 
-        if (is_eof) {
+        if (exit) {
             free(s_in);
             break;
         }
 
-//        printf("string: \'%s\'\n", s_in);
+        printf("string: \'%s\'\n", s_in);
         struct cmd_list c_list = parse_line(s_in);
-//        print_cmds(c_list);
+        print_cmds(c_list);
 
-        int result = process_pipes(c_list);
+        int result = process_pipes(c_list, &exit);
 
         free_cmds(&c_list);
         free(s_in);
+
+        if (exit) break;
     }
 
     fclose(stdin);
