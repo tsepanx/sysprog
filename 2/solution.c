@@ -12,6 +12,7 @@
 #define QUOTE_1 '\''
 #define QUOTE_2 '\"'
 #define BACKSLASH '\\'
+#define SHARP '#'
 
 enum bool {
     true = 1,
@@ -78,17 +79,22 @@ void strip_se_space(struct string_ends* se) {
     strip_se_ch(se, SPACE);
 }
 
+enum bool is_char(const char* it, const char ch) {
+    int prev_not_backslash = it[-1] != BACKSLASH;
+    return prev_not_backslash && (*it == ch);
+}
 
 enum bool is_quote(const char* it) {
-    return *it == QUOTE_1 || *it == QUOTE_2;
+    return is_char(it, QUOTE_1) || is_char(it, QUOTE_2);
 }
 
 enum bool is_space_delim(const char* it) {
-    return *it == SPACE || *it == LINE_BREAK;
+    return is_char(it, SPACE) || is_char(it, LINE_BREAK);
 }
 
 enum bool is_cmd_delim(const char* it) {
-    return *it == BAR || *it == '>' || (*it == '>' && it[1] == '>') || *it == ';';
+    int prev_not_backslash = it[-1] != BACKSLASH;
+    return prev_not_backslash && (*it == BAR || *it == '>' || (*it == '>' && it[1] == '>') || *it == ';');
 }
 
 enum cmd_out_redir delim_type(const char* it) {
@@ -122,22 +128,30 @@ int parse_args(struct string_ends* args_string, char*** args_list_out) {
     char* iter = args_string->l;
     char* iter_save = iter;
 
-    int in_quotes_2 = 0;
+    int in_quotes1 = 0;
+    int in_quotes2 = 0;
 
     while (iter <= args_string->r) {
+        int is_already_in_quotes = in_quotes1 || in_quotes2;
 
-        // TODO Add quote_1 support
-        int end_of_quote_arg = in_quotes_2 && (*iter == QUOTE_2);
-        int end_of_arg = !in_quotes_2 && (is_space_delim(iter) || is_cmd_delim(iter) || is_quote(iter));
-        if ((end_of_quote_arg || end_of_arg) && (iter > iter_save)) { // ' ', '\n'
+        int is_any_delim = is_space_delim(iter) || is_cmd_delim(iter) || is_quote(iter);
+
+        int end_of_quote1_arg = in_quotes1 && is_char(iter, QUOTE_1);
+        int end_of_quote2_arg = in_quotes2 && is_char(iter, QUOTE_2);
+        int end_of_simple_arg = !is_already_in_quotes && is_any_delim;
+
+        int is_not_empty = iter > iter_save;
+        if ((end_of_quote1_arg || end_of_quote2_arg || end_of_simple_arg) && is_not_empty) {
             struct string_ends se_arg = (struct string_ends) {.l = iter_save, .r = iter};
 
-            if (*iter == QUOTE_1) {
+            if (is_char(iter, QUOTE_1)) {
                 strip_se_ch(&se_arg, QUOTE_1);
                 iter++;
-            } else if (*iter == QUOTE_2) {
+                in_quotes1 = 0;
+            } else if (is_char(iter, QUOTE_2)) {
                 strip_se_ch(&se_arg, QUOTE_2);
                 iter++;
+                in_quotes2 = 0;
             }
             args_list[args_cnt] = se_dup(se_arg );
             args_cnt++;
@@ -148,8 +162,11 @@ int parse_args(struct string_ends* args_string, char*** args_list_out) {
             strip_l(&iter, SPACE);
             iter_save = iter;
         }
-        if (*iter == QUOTE_2) { // "
-            in_quotes_2 = !in_quotes_2;
+        if (is_char(iter, QUOTE_1) && !in_quotes2) {
+            in_quotes1 = !in_quotes1;
+        }
+        if (is_char(iter, QUOTE_2)  && !in_quotes1) {
+            in_quotes2 = !in_quotes2;
         }
         iter++;
     }
@@ -165,7 +182,8 @@ struct cmd parse_exec(struct string_ends* exec_string) {
     char* iter = exec_string->l;
     char* iter_save = iter;
     while (iter < exec_string->r) {
-        if (is_space_delim(iter)) { break; }
+        int is_delim = is_space_delim(iter);
+        if (is_delim) { break; }
         iter++;
     }
 
@@ -189,11 +207,14 @@ struct cmd_list parse_line(char* s) {
     char* it = s;
     char* iter_save = it;
 
-    int in_quotes = 0;
+    int in_quotes1 = 0;
+    int in_quotes2 = 0;
 
     while (*it) {
-        if (is_quote(it)) { in_quotes = !in_quotes; }
-        if (is_cmd_delim(it) && !in_quotes && (iter_save != it)) {
+        int in_quotes = in_quotes1 || in_quotes2;
+        int not_empty = iter_save < it;
+
+        if (is_cmd_delim(it) && !in_quotes && not_empty) {
             enum cmd_out_redir redir_sign = delim_type(it);
             struct string_ends exec_string = (struct string_ends) { .l = iter_save, .r = it };
             iter_save = it + 1;
@@ -208,6 +229,14 @@ struct cmd_list parse_line(char* s) {
             result_commands[cmd_cnt].redir_sign = redir_sign;
             cmd_cnt++;
         }
+
+        if (is_char(it, QUOTE_1) && !in_quotes2) {
+            in_quotes1 = !in_quotes1;
+        }
+        if (is_char(it, QUOTE_2)  && !in_quotes1) {
+            in_quotes2 = !in_quotes2;
+        }
+
         it++;
     }
 
@@ -268,6 +297,7 @@ char* read_line(FILE* stream, enum bool* is_eof) {
 
             continue;
         }
+        else if (is_char(&it, SHARP)) break;
         else if (it == LINE_BREAK) break;
         else if (it == EOF) {
             *is_eof = true;
