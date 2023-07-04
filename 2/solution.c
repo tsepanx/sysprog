@@ -349,6 +349,26 @@ int process_pipes(struct cmd_list c_list) {
             pipe(pipe_end);
         }
 
+        struct cmd cmd_cur = c_list.start[i];
+
+        if (strcmp(cmd_cur.name, "cd") == 0) {
+            int cd_result = chdir(cmd_cur.argv[1]);
+            if (cd_result == -1) {
+                printf("cd: no dir found: %s\n", cmd_cur.argv[1]);
+            }
+            continue;
+        }
+        else if (strcmp(cmd_cur.name, "exit") == 0 && c_list.size == 1) {
+            int code;
+            if (cmd_cur.argc > 1) {
+                code = atol(cmd_cur.argv[1]);
+            }
+            else {
+                code = 0;
+            }
+            exit(code);
+        }
+
         pids[i] = fork();
 
         if (pids[i] < 0) {
@@ -368,7 +388,7 @@ int process_pipes(struct cmd_list c_list) {
                 close(pipe_end[1]);
             }
 
-            struct cmd cmd_cur = c_list.start[i];
+//            struct cmd cmd_cur = c_list.start[i];
 
             execvp(cmd_cur.name, cmd_cur.argv);
             fprintf(stderr, "my-shell: %s: %s\n", cmd_cur.name, strerror(errno));
