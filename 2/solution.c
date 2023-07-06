@@ -188,16 +188,35 @@ struct cmd parse_exec(struct string_ends* exec_string) {
 
     char* iter = exec_string->l;
     strip_l(&iter, '>');
-    strip_l(&iter, SPACE);
 
-    char* iter_save = iter;
-    while (iter < exec_string->r) {
-        int is_delim = is_space_delim(iter);
-        if (is_delim) { break; }
-        iter++;
+    if (iter[-1] == '>') {
+        strip_l(&iter, SPACE);
+        char** tmp_args = NULL;
+        struct string_ends* tmp_se = malloc(sizeof(struct string_ends));
+        tmp_se->l = iter;
+        tmp_se->r = exec_string->r;
+        int argcc = parse_args(tmp_se, &tmp_args);
+        fprintf(stderr, "FIRST ARG: '%s'\n", tmp_args[1]);
+
+        for (int i = 0; i < argcc; ++i) {
+            printf("%d: '%s'\n\n", i, tmp_args[i]);
+        }
+        res_obj.name = tmp_args[1];
+        free(tmp_se);
+
+        iter += strlen(tmp_args[1]) + 1;
+        free(tmp_args[0]);
+        free(tmp_args);
+    } else {
+        char* iter_save = iter;
+        while (iter < exec_string->r) {
+            int is_delim = is_space_delim(iter);
+            if (is_delim) { break; }
+            iter++;
+        }
+
+        res_obj.name = se_dup((struct string_ends) { .l = iter_save, .r = iter });
     }
-
-    res_obj.name = se_dup((struct string_ends) { .l = iter_save, .r = iter });
 
     strip_l(&iter, SPACE); // Gap between 'name' and 'args123...'
 
