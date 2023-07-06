@@ -49,14 +49,53 @@ int se_size(struct string_ends* se) {
     return (int) (se->r - se->l);
 }
 
-char* se_dup(struct string_ends se) {
-    int size = se_size(&se);
+enum bool is_char(const char* it, const char ch) {
+    int prev_not_backslash = it[-1] != BACKSLASH;
+    return prev_not_backslash && (*it == ch);
+}
 
-    char* dest = malloc((size + 1) * sizeof(char));
-    memcpy(dest, se.l, size);
-    dest[size] = '\0';
+char* se_dup(struct string_ends se, enum bool quoted) {
+//    if (quoted) {
+//    {
+        int _init_size = se_size(&se);
+        char* _dest = malloc((_init_size + 1) * sizeof(char));
+        memcpy(_dest, se.l, _init_size);
+        _dest[_init_size] = '\0';
+//        return dest;
+//    }
 
-    return dest;
+//    int init_size = se_size(&se);
+
+    char* dest = malloc(1);
+
+    char* it = se.l;
+    int i = 0;
+    while (it < se.r) {
+        if (is_char(it, BACKSLASH)) {
+            it++;
+        }
+        dest[i] = *it;
+        i++;
+        it++;
+        dest = realloc(dest, i + 1);
+    }
+
+//    i++;
+    dest = realloc(dest, i + 1);
+    dest[i] = '\0';
+
+    printf("quoted: %d\n", quoted);
+    printf("TEST NEW DUP: '%s', '%s'\n", _dest, dest);
+
+//    return _dest;
+
+    if (quoted) {
+        free(dest);
+        return _dest;
+    } else {
+        free(_dest);
+        return dest;
+    }
 }
 
 void strip_l(char** l, char ch) {
@@ -80,11 +119,6 @@ void strip_se_space(struct string_ends* se) {
     strip_se_ch(se, SPACE);
 }
 
-enum bool is_char(const char* it, const char ch) {
-    int prev_not_backslash = it[-1] != BACKSLASH;
-    return prev_not_backslash && (*it == ch);
-}
-
 enum bool is_quote(const char* it) {
     return is_char(it, QUOTE_1) || is_char(it, QUOTE_2);
 }
@@ -94,7 +128,7 @@ enum bool is_space_delim(const char* it) {
 }
 
 enum bool is_app_delim(const char* it) {
-    return *it == '>' && it[1] == '>';
+    return is_char(it, '>') && is_char(it + 1, '>');
 }
 
 enum cmd_out_redir delim_type(const char* it) {
@@ -106,9 +140,9 @@ enum cmd_out_redir delim_type(const char* it) {
         return PIPE;
     } else if (is_app_delim(it)) {
         return FILE_APP;
-    } else if (*it == '>') {
+    } else if (is_char(it, '>')) {
         return FILE_WRT;
-    } else if (*it == ';') {
+    } else if (is_char(it, ';')) {
         return STDOUT;
     }
     return -1;
@@ -139,6 +173,7 @@ int parse_args(struct string_ends* args_string, char*** args_list_out) {
     int in_quotes2 = 0;
 
     while (iter <= args_string->r) {
+//        int is_prev_backslash = is_char(iter - 1, BACKSLASH);
         int is_already_in_quotes = in_quotes1 || in_quotes2;
 
         int is_any_delim = is_space_delim(iter) || is_cmd_delim(&iter) || is_quote(iter);
@@ -151,16 +186,20 @@ int parse_args(struct string_ends* args_string, char*** args_list_out) {
         if ((end_of_quote1_arg || end_of_quote2_arg || end_of_simple_arg) && is_not_empty) {
             struct string_ends se_arg = (struct string_ends) {.l = iter_save, .r = iter};
 
+            enum bool quoted = false;
+
             if (is_char(iter, QUOTE_1)) {
                 strip_se_ch(&se_arg, QUOTE_1);
                 iter++;
                 in_quotes1 = 0;
+                quoted = true;
             } else if (is_char(iter, QUOTE_2)) {
                 strip_se_ch(&se_arg, QUOTE_2);
                 iter++;
                 in_quotes2 = 0;
+                quoted = true;
             }
-            args_list[args_cnt] = se_dup(se_arg );
+            args_list[args_cnt] = se_dup(se_arg, quoted);
             args_cnt++;
 
             void * new_ptr = realloc(args_list, (args_cnt + 1) * sizeof(char *));
@@ -189,7 +228,9 @@ struct cmd parse_exec(struct string_ends* exec_string) {
     char* iter = exec_string->l;
     strip_l(&iter, '>');
 
-    if (iter[-1] == '>') {
+    printf("iter: %c\n", *iter);
+
+    if (is_char(&iter[-1], '>') || is_char(&iter[-2], '>')) {
         strip_l(&iter, SPACE);
         char** tmp_args = NULL;
         struct string_ends* tmp_se = malloc(sizeof(struct string_ends));
@@ -215,7 +256,7 @@ struct cmd parse_exec(struct string_ends* exec_string) {
             iter++;
         }
 
-        res_obj.name = se_dup((struct string_ends) { .l = iter_save, .r = iter });
+        res_obj.name = se_dup((struct string_ends) { .l = iter_save, .r = iter }, false);
     }
 
     strip_l(&iter, SPACE); // Gap between 'name' and 'args123...'
