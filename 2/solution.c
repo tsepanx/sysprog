@@ -71,7 +71,10 @@ char* se_dup(struct string_ends se, enum bool quoted) {
     char* it = se.l;
     int i = 0;
     while (it < se.r) {
-        if (is_char(it, BACKSLASH)) {
+        if (*it == BACKSLASH) {
+            if (quoted && it[-1] != BACKSLASH) {
+                it--;
+            }
             it++;
         }
         dest[i] = *it;
@@ -89,13 +92,13 @@ char* se_dup(struct string_ends se, enum bool quoted) {
 
 //    return _dest;
 
-    if (quoted) {
-        free(dest);
-        return _dest;
-    } else {
-        free(_dest);
-        return dest;
-    }
+//    if (quoted) {
+//        free(dest);
+//        return _dest;
+//    } else {
+    free(_dest);
+    return dest;
+//    }
 }
 
 void strip_l(char** l, char ch) {
