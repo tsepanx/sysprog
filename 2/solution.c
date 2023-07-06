@@ -71,11 +71,13 @@ char* se_dup(struct string_ends se, enum bool quoted) {
     char* it = se.l;
     int i = 0;
     while (it < se.r) {
+//        printf("||: %s, %s\n", it, se.r);
         if (*it == BACKSLASH) {
             if (quoted && it[-1] != BACKSLASH) {
-                it--;
+//                it--;
+            } else {
+                it++;
             }
-            it++;
         }
         dest[i] = *it;
         i++;
@@ -87,8 +89,8 @@ char* se_dup(struct string_ends se, enum bool quoted) {
     dest = realloc(dest, i + 1);
     dest[i] = '\0';
 
-    printf("quoted: %d\n", quoted);
-    printf("TEST NEW DUP: '%s', '%s'\n", _dest, dest);
+//    printf("quoted: %d\n", quoted);
+//    printf("TEST NEW DUP: '%s', '%s'\n", _dest, dest);
 
 //    return _dest;
 
@@ -231,7 +233,7 @@ struct cmd parse_exec(struct string_ends* exec_string) {
     char* iter = exec_string->l;
     strip_l(&iter, '>');
 
-    printf("iter: %c\n", *iter);
+//    printf("iter: %c\n", *iter);
 
     if (is_char(&iter[-1], '>') || is_char(&iter[-2], '>')) {
         strip_l(&iter, SPACE);
@@ -240,11 +242,11 @@ struct cmd parse_exec(struct string_ends* exec_string) {
         tmp_se->l = iter;
         tmp_se->r = exec_string->r;
         int argcc = parse_args(tmp_se, &tmp_args);
-        fprintf(stderr, "FIRST ARG: '%s'\n", tmp_args[1]);
+//        fprintf(stderr, "FIRST ARG: '%s'\n", tmp_args[1]);
 
-        for (int i = 0; i < argcc; ++i) {
-            printf("%d: '%s'\n\n", i, tmp_args[i]);
-        }
+//        for (int i = 0; i < argcc; ++i) {
+//            printf("%d: '%s'\n\n", i, tmp_args[i]);
+//        }
         res_obj.name = tmp_args[1];
         free(tmp_se);
 
@@ -474,7 +476,7 @@ int process_pipes(struct cmd_list c_list, enum bool *is_exit) {
                 const char* filename = c_list.start[i + 1].name;
                 char* mode;
 
-                printf("redir: %d\n", cmd_cur.redir_sign);
+//                printf("redir: %d\n", cmd_cur.redir_sign);
 
                 if (cmd_cur.redir_sign == FILE_APP) {
 //                    fprintf(stderr, "mode = %d\n", O_WRONLY | O_CREAT | O_APPEND);
@@ -517,6 +519,7 @@ int process_pipes(struct cmd_list c_list, enum bool *is_exit) {
                 close(pipe_start[1]);
             }
 
+//            fprintf(stderr, "CMD: %s\n", cmd_cur.name)
             execvp(cmd_cur.name, cmd_cur.argv);
             exit(EXIT_FAILURE);
         } else { // PARENT
@@ -580,9 +583,9 @@ int main() {
             break;
         }
 
-        printf("string: \'%s\'\n", s_in);
+//        fprintf(stdout, "STRING IN: \'%s\'\n", s_in);
         struct cmd_list c_list = parse_line(s_in);
-        print_cmds(c_list);
+//        print_cmds(c_list);
 
         result = process_pipes(c_list, &is_exit);
 
