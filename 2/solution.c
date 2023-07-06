@@ -97,29 +97,25 @@ enum bool is_app_delim(const char* it) {
     return *it == '>' && it[1] == '>';
 }
 
-enum bool is_cmd_delim(char** itd) {
-    const char* it = *itd;
+enum cmd_out_redir delim_type(const char* it) {
     int prev_not_backslash = it[-1] != BACKSLASH;
 
-    if (is_app_delim(it) && prev_not_backslash) {
-        (*itd)++;
-        printf("IT(D)++: %c", *it);
-    }
+    if (!prev_not_backslash) { return -1; }
 
-    return prev_not_backslash && (*it == BAR || *it == '>' || is_app_delim(it) || *it == ';');
-}
-
-enum cmd_out_redir delim_type(const char* it) {
     if (*it == BAR) {
         return PIPE;
+    } else if (is_app_delim(it)) {
+        return FILE_APP;
     } else if (*it == '>') {
         return FILE_WRT;
-    } else if (*it == '>' && it[1] == '>') {
-        return FILE_APP;
     } else if (*it == ';') {
         return STDOUT;
     }
     return -1;
+}
+
+enum bool is_cmd_delim(char** itd) {
+    return delim_type(*itd) != -1;
 }
 
 int parse_args(struct string_ends* args_string, char*** args_list_out) {
@@ -191,6 +187,9 @@ struct cmd parse_exec(struct string_ends* exec_string) {
     struct cmd res_obj = (struct cmd) { .name = NULL, .argc = 0, .argv = NULL, .redir_sign = -100 };
 
     char* iter = exec_string->l;
+    strip_l(&iter, '>');
+    strip_l(&iter, SPACE);
+
     char* iter_save = iter;
     while (iter < exec_string->r) {
         int is_delim = is_space_delim(iter);
@@ -266,7 +265,7 @@ void print_cmd(struct cmd c) {
     printf("--- CMD ---\n");
     printf("NAME: ");
 //    print_se(&c.name);
-    printf("%s", c.name);
+    printf("'%s'", c.name);
     printf("\nARGC: %d\n", c.argc);
     for (int i = 0; i < c.argc; ++i) {
         printf("ARG {%d}: \"", i);
@@ -310,6 +309,9 @@ char* read_line(FILE* stream, enum bool* is_eof) {
 
             continue;
         }
+//        else if (prev == BACKSLASH && !in_quotes) {
+//
+//        }
         else if (is_char(&it, SHARP)) break;
         else if (it == LINE_BREAK) break;
         else if (it == EOF) {
@@ -364,6 +366,7 @@ int process_pipes(struct cmd_list c_list, enum bool *is_exit) {
 
         if (i > 0) {
             if (c_list.start[i - 1].redir_sign == FILE_APP || c_list.start[i - 1].redir_sign == FILE_WRT) {
+                pids[i] = -1;
                 continue;
             }
         }
@@ -406,25 +409,43 @@ int process_pipes(struct cmd_list c_list, enum bool *is_exit) {
             if (cmd_cur.redir_sign == FILE_APP || cmd_cur.redir_sign == FILE_WRT) {
                 int fd;
                 const char* filename = c_list.start[i + 1].name;
-                int mode;
+                char* mode;
+
+                printf("redir: %d\n", cmd_cur.redir_sign);
 
                 if (cmd_cur.redir_sign == FILE_APP) {
-                    mode = O_WRONLY | O_CREAT | O_APPEND;
+//                    fprintf(stderr, "mode = %d\n", O_WRONLY | O_CREAT | O_APPEND);
+//                    mode = O_WRONLY | O_CREAT | O_APPEND;
+                    mode = "a+";
                 }
                 else {
-                    mode = O_WRONLY | O_CREAT | O_TRUNC;
+//                    mode = O_WRONLY | O_CREAT | O_TRUNC;
+                    mode = "w+";
                 }
 
 //                printf("FILENAME: %s\n", filename);
-                fd = open(filename, mode, 0666);
+//                fd = open(filename, mode, 0666);
+                FILE* fout = fopen(filename, mode);
+                fd = fileno(fout);
+//                write(fd, "ap?", 3);
 
                 if (fd == -1) {
-                    printf("Error: redirect failed.\n");
+                    fprintf(stderr, "Error: redirect failed.\n");
                     exit(EXIT_FAILURE);
                 }
 
                 dup2(fd, STDOUT_FILENO);
+
                 close(fd);
+
+                close(pipe_end[0]);
+                close(pipe_end[1]);
+            }
+
+            else if (i < c_list.size - 1) {
+                close(pipe_end[0]);
+                dup2(pipe_end[1], STDOUT_FILENO);
+                close(pipe_end[1]);
             }
 
             if (i > 0) {
@@ -433,23 +454,7 @@ int process_pipes(struct cmd_list c_list, enum bool *is_exit) {
                 close(pipe_start[1]);
             }
 
-            if (i < c_list.size - 1) {
-                close(pipe_end[0]);
-//                dup2(pipe_end[1], STDERR_FILENO);
-                dup2(pipe_end[1], STDOUT_FILENO);
-                close(pipe_end[1]);
-            }
-
-//            struct cmd cmd_cur = c_list.start[i];
-
-//            fprintf(stderr, "ERR\n");
-//            dup2(STDERR_FILENO, STDOUT_FILENO);
             execvp(cmd_cur.name, cmd_cur.argv);
-//            fprintf(stderr, "my-shell: %s: %s\n", cmd_cur.name, strerror(errno));
-//            return errno;
-//            printf("ERRNO: %d\n", errno);
-//            *is_exit = true;
-//            return errno;
             exit(EXIT_FAILURE);
         } else { // PARENT
             if (i > 0) {
@@ -473,15 +478,17 @@ int process_pipes(struct cmd_list c_list, enum bool *is_exit) {
     if (c_list.size == 0) {
         return 0;
     }
-//    } else {
-//        return 0;
-//    }
 
     int res_status;
     for (int i = 0; i < c_list.size; i++) {
         int status;
+        if (pids[i] == -1) {
+//            fprintf(stderr, "continue, pids[i]: %d\n", pids[i]);
+            continue;
+        }
         int res_wait = waitpid(pids[i], &status, 0);
 //        printf("RES_WAIT: %d\n", res_wait);
+//        fprintf(stderr, "res_wait: %d\n", res_wait);
         assert(res_wait >= 0);
 
         if (WIFEXITED(status)) {
@@ -510,9 +517,9 @@ int main() {
             break;
         }
 
-//        printf("string: \'%s\'\n", s_in);
+        printf("string: \'%s\'\n", s_in);
         struct cmd_list c_list = parse_line(s_in);
-//        print_cmds(c_list);
+        print_cmds(c_list);
 
         result = process_pipes(c_list, &is_exit);
 
