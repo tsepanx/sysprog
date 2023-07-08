@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include "libcoro.h"
 
 #define OUT_FNAME "out1.txt"
@@ -12,9 +13,15 @@ struct int_arr {
 };
 
 struct coro_args {
-    char* name;
-    struct int_arr* ia;
+//    char* name;
+//    struct int_arr* ia;
+//    char *** cur_file_ptr;
+//    char *** after_last_file_ptr;
 //    unsigned long* run_time;
+    char** fnames;
+    int fnames_cnt;
+    int* global_i;
+    struct int_arr** ia_arr;
 };
 
 void print_arr(struct int_arr* arr) {
@@ -184,91 +191,107 @@ struct int_arr* multiple_ia_sort(struct int_arr** ia_arr, int size) {
 
 static int coroutine_func_f(void *arg1) {
     struct coro_args* ca = arg1;
-    struct int_arr* ia = ca->ia;
-    char* coro_name = ca->name;
+
+    while (*ca->global_i < ca->fnames_cnt) {
+        int cur_i = *ca->global_i;
+        (*ca->global_i)++;
+        char* cur_fname = ca->fnames[cur_i];
+
+        printf("CA: %p - %s\n", ca, cur_fname);
+
+        struct int_arr* ia_i = malloc(sizeof(struct int_arr));
+        int res_read = arr_from_file(cur_fname, ia_i);
+        if (res_read == -1) {
+            return -1;
+        }
+
+        unsigned long t_start = get_cur_time();
+        unsigned long *t_hold = malloc(sizeof(unsigned long));
+        *t_hold = 0;
+
+        /* IMPLEMENT SORTING OF INDIVIDUAL FILES HERE. */
+
+        sort_int_arr(ia_i, t_hold);
+        ca->ia_arr[cur_i] = ia_i;
+
+        size_t exec_time = get_cur_time() - t_start - *t_hold;
+
+        struct coro *this = coro_this();
+        printf("%p: %s t_hold: %lu microsec\n", ca, cur_fname, *t_hold);
+        printf("%p: %s exec_time: %lu microsec\n", ca, cur_fname, exec_time);
+        printf("%p: %s switch count: %lld\n", ca, cur_fname, coro_switch_count(this));
+
+        free(t_hold);
+    }
 
     free(ca);
-
-    unsigned long t_start = get_cur_time();
-    unsigned long* t_hold = malloc(sizeof(unsigned long));
-    *t_hold = 0;
-
-    /* IMPLEMENT SORTING OF INDIVIDUAL FILES HERE. */
-
-    sort_int_arr(ia, t_hold);
-
-    size_t exec_time = get_cur_time() - t_start - *t_hold;
-
-    struct coro* this = coro_this();
-    printf("Coro %s t_hold: %lu microsec\n", coro_name, *t_hold);
-    printf("Coro %s exec_time: %lu microsec\n", coro_name, exec_time);
-    printf("Coro %s switch count: %lld\n", coro_name, coro_switch_count(this));
-
-    free(t_hold);
-
-	return 0;
+    return 0;
 }
 
 int main(int argc, char **argv) {
-    unsigned long start_time;
-
     struct timespec exec_time;
     clock_gettime(CLOCK_MONOTONIC, &exec_time);
 
-    start_time = get_cur_time();
+    unsigned long start_time = get_cur_time();
 
-    int fnames_cnt = argc - 1;
-    char** fnames = ++argv;
+    argv++;
+    int coro_latency = (int) strtol(*(argv++), NULL, 10);
+    int coro_count = (int) strtol(*(argv++), NULL, 10);
 
-    struct int_arr** ia_arr = malloc(fnames_cnt * sizeof(struct int_arr));
-    struct coro_args* ca_arr[fnames_cnt];
+    printf("CORO COUNT: %d\n", coro_count);
+
+    int fnames_cnt = argc - 3;
+    char** fnames = argv;
+    int GLOBAL_I = 0;
+
+    for (int i = 0; i < fnames_cnt; ++i) {
+        if (access(fnames[i], F_OK) != 0) {
+            printf("FILE NOT FOUND: %s\n", fnames[i]);
+            exit(-1);
+        }
+    }
+
+    struct int_arr** ia_arr = malloc(fnames_cnt * sizeof(struct int_arr*));
+    struct coro_args* ca_arr[coro_count];
 
 	/* Initialize our coroutine global cooperative scheduler. */
 	coro_sched_init();
 
 	/* Start several coroutines. */
-	for (int i = 0; i < fnames_cnt; ++i) {
+	for (int i = 0; i < coro_count; ++i) {
 		/*
 		 * The coroutines can take any 'void *' interpretation of which
 		 * depends on what you want. Here as an example I give them
 		 * some names.
 		 */
 
-        struct int_arr* ia_i = malloc(sizeof(struct int_arr));
-        int res_read = arr_from_file(fnames[i], ia_i);
-        if (res_read == -1) {
-            for (int j = 0; j < i; ++j) {
-                free_int_arr(ia_arr[j]);
-                free(ca_arr[j]);
-            }
-            free(ia_arr);
-            free(ia_i);
-            return -1;
-        }
-        ia_arr[i] = ia_i;
-
         struct coro_args* ca_i = malloc(sizeof(struct coro_args));
-        ca_i->ia = ia_i;
-        ca_i->name = fnames[i];
+        ca_i->ia_arr = ia_arr;
+        ca_i->fnames = fnames;
+        ca_i->fnames_cnt = fnames_cnt;
+        ca_i->global_i = &GLOBAL_I;
 
         ca_arr[i] = ca_i;
-//        coro_new(coroutine_func_f, ca_i);
     }
 
-    for (int i = 0; i < fnames_cnt; ++i) {
+    for (int i = 0; i < coro_count; ++i) {
         coro_new(coroutine_func_f, ca_arr[i]);
     }
 
 	/* Wait for all the coroutines to end. */
 	struct coro *c;
+
+    int ii = 0;
 	while ((c = coro_sched_wait()) != NULL) {
 		/*
 		 * Each 'wait' returns a finished coroutine with which you can
 		 * do anything you want. Like check its exit status, for
 		 * example. Don't forget to free the coroutine afterwards.
 		 */
-		printf("Finished %d\n", coro_status(c));
+        int coro_code = coro_status(c);
+		printf("Finished (%p) %d\n", ca_arr[ii], coro_code);
 		coro_delete(c);
+        ii++;
 	}
 
     /* All coroutines have finished. */
