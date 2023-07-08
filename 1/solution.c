@@ -14,7 +14,6 @@ struct int_arr {
 struct coro_args {
     char* name;
     struct int_arr* ia;
-    int asdf[11111];
 //    unsigned long* run_time;
 };
 
@@ -29,15 +28,15 @@ void print_arr(struct int_arr* arr) {
     printf(" |\n");
 }
 
-unsigned long nsec(struct timespec ts) {
-    return ts.tv_sec * (unsigned) 1e9 + ts.tv_nsec;
+unsigned long microsec(struct timespec ts) {
+    return ts.tv_sec * (unsigned) 1e6 + ts.tv_nsec / (unsigned) 1e3;
 }
 
 unsigned long get_cur_time() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
 
-    return nsec(ts);
+    return microsec(ts);
 }
 
 void my_qsort(int* arr, int i_start, int i_end, unsigned long* t_hold) {
@@ -201,8 +200,8 @@ static int coroutine_func_f(void *arg1) {
     size_t exec_time = get_cur_time() - t_start - *t_hold;
 
     struct coro* this = coro_this();
-    printf("Coro %s t_hold: %lu nsec\n", coro_name, *t_hold);
-    printf("Coro %s exec_time: %lu nsec\n", coro_name, exec_time);
+    printf("Coro %s t_hold: %lu microsec\n", coro_name, *t_hold);
+    printf("Coro %s exec_time: %lu microsec\n", coro_name, exec_time);
     printf("Coro %s switch count: %lld\n", coro_name, coro_switch_count(this));
 
     free(t_hold);
@@ -294,8 +293,8 @@ int main(int argc, char **argv) {
     clock_gettime(CLOCK_MONOTONIC, &exec_time);
     finish_time = get_cur_time();
 
-    unsigned long nsecs = finish_time - start_time;
-    printf("Overall execution time: %lu nsec\n", nsecs);
+    unsigned long msecs = finish_time - start_time;
+    printf("Overall execution time: %lu microsec\n", msecs);
 
 	return 0;
 }
