@@ -13,15 +13,11 @@ struct int_arr {
 };
 
 struct coro_args {
-//    char* name;
-//    struct int_arr* ia;
-//    char *** cur_file_ptr;
-//    char *** after_last_file_ptr;
-//    unsigned long* run_time;
     char** fnames;
     int fnames_cnt;
     int* global_i;
     struct int_arr** ia_arr;
+    int coro_latency;
 };
 
 void print_arr(struct int_arr* arr) {
@@ -46,7 +42,7 @@ unsigned long get_cur_time() {
     return microsec(ts);
 }
 
-void my_qsort(int* arr, int i_start, int i_end, unsigned long* t_hold) {
+void my_qsort(int* arr, int i_start, int i_end, unsigned long* t_hold, unsigned long* t_coro_iteration_start, int coro_latency) {
     int m = arr[(i_end + i_start) / 2];
 
     int i = i_start;
@@ -69,27 +65,31 @@ void my_qsort(int* arr, int i_start, int i_end, unsigned long* t_hold) {
             i++;
             j--;
 
-            size_t t1 = get_cur_time();
+            unsigned long passed_time_since_iteration = get_cur_time() - *t_coro_iteration_start;
+            if (passed_time_since_iteration >= coro_latency) {
+                size_t t1 = get_cur_time();
 
-            coro_yield(); // Yield here
+                coro_yield(); // ==================== YIELD HERE =================
 
-            size_t t2 = get_cur_time();
-            size_t diff = t2 - t1;
+                size_t t2 = get_cur_time();
+                *t_coro_iteration_start = t2;
 
-            *t_hold += diff;
+                size_t diff = t2 - t1;
+                *t_hold += diff;
+            }
         }
     } while (i <= j);
 
     if (j > i_start) {
-        my_qsort(arr, i_start, j, t_hold);
+        my_qsort(arr, i_start, j, t_hold, t_coro_iteration_start, coro_latency);
     }
     if (i < i_end) {
-        my_qsort(arr, i, i_end, t_hold);
+        my_qsort(arr, i, i_end, t_hold, t_coro_iteration_start, coro_latency);
     }
 }
 
-void sort_int_arr(struct int_arr* ia, unsigned long* t_hold) {
-    my_qsort(ia->start, 0, ia->length - 1, t_hold);
+void sort_int_arr(struct int_arr* ia, unsigned long* t_hold, unsigned long* t_coro_iteration_start, int coro_latency) {
+    my_qsort(ia->start, 0, ia->length - 1, t_hold, t_coro_iteration_start, coro_latency);
 }
 
 int arr_from_file(char* fname, struct int_arr* ia_out) {
@@ -206,22 +206,20 @@ static int coroutine_func_f(void *arg1) {
         }
 
         unsigned long t_start = get_cur_time();
-        unsigned long *t_hold = malloc(sizeof(unsigned long));
-        *t_hold = 0;
+        unsigned long t_hold = 0;
+        unsigned long t_coro_iteration_start = get_cur_time();
 
         /* IMPLEMENT SORTING OF INDIVIDUAL FILES HERE. */
 
-        sort_int_arr(ia_i, t_hold);
+        sort_int_arr(ia_i, &t_hold, &t_coro_iteration_start, ca->coro_latency);
         ca->ia_arr[cur_i] = ia_i;
 
-        size_t exec_time = get_cur_time() - t_start - *t_hold;
+        size_t exec_time = get_cur_time() - t_start - t_hold;
 
         struct coro *this = coro_this();
-        printf("%p: %s t_hold: %lu microsec\n", ca, cur_fname, *t_hold);
+        printf("%p: %s t_hold: %lu microsec\n", ca, cur_fname, t_hold);
         printf("%p: %s exec_time: %lu microsec\n", ca, cur_fname, exec_time);
         printf("%p: %s switch count: %lld\n", ca, cur_fname, coro_switch_count(this));
-
-        free(t_hold);
     }
 
     free(ca);
@@ -270,6 +268,7 @@ int main(int argc, char **argv) {
         ca_i->fnames = fnames;
         ca_i->fnames_cnt = fnames_cnt;
         ca_i->global_i = &GLOBAL_I;
+        ca_i->coro_latency = coro_latency / coro_count;
 
         ca_arr[i] = ca_i;
     }
