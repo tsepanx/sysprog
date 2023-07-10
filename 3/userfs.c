@@ -114,9 +114,14 @@ void free_block(struct block* b) {
 
 void free_file(struct file* f) {
     struct block* bi = f->block_list;
-    while (bi <= f->last_block) {
+    while (1) {
         free_block(bi);
-        bi++;
+
+        if (bi->next == NULL) {
+            break;
+        }
+
+        bi = bi->next;
     }
     free(f);
 }
@@ -134,24 +139,24 @@ void add_block(struct file* f) {
     f->last_block = b;
 }
 
-void add_file_to_list(struct file* f, struct file** f_list) {
-    struct file* f_i = *f_list;
+void add_file_to_list(struct file* f, struct file** flist_ptr) {
+    struct file* file_list_obj = *flist_ptr;
 
-    if (*f_list == NULL) {
-        *f_list = f;
+    if (file_list_obj == NULL) {
+        *flist_ptr = f;
         return;
     }
 
     while (1) {
-        if (f_i->next != NULL) {
-            f_i = f_i->next;
+        if (file_list_obj->next != NULL) {
+            file_list_obj = file_list_obj->next;
         } else {
             break;
         }
     }
 
-    f_i->next = f;
-    f->prev = f_i;
+    file_list_obj->next = f;
+    f->prev = file_list_obj;
 }
 
 int add_fd_to_list(struct filedesc* fd) {
@@ -211,15 +216,86 @@ void destroy_file(struct file* f) {
     free_file(f);
 }
 
-int destroy_fd(int i) {
+struct filedesc* get_fd(int i) {
     if (i < 0 || i >= file_descriptor_capacity || file_descriptors[i] == NULL) {
+        return NULL;
+    }
+
+    return file_descriptors[i];
+}
+
+int destroy_fd(int i) {
+    struct filedesc* fd = get_fd(i);
+    if (fd == NULL) {
         return -1;
     }
 
-    free_file_desc(file_descriptors[i]);
+    fd->file->refs--;
+    free_file_desc(fd);
     remove_fd_from_list_by_i(i);
 
     return 0;
+}
+
+struct block* get_block_by_i(struct file* f, int target_i) {
+    assert(f->block_list != NULL);
+
+    struct block* bi = f->block_list;
+    int i = 0;
+    while (1) {
+        if (i == target_i) {
+            return bi;
+        }
+
+        if (bi->next == NULL) {
+            break;
+        }
+
+        i++;
+        bi = bi->next;
+    }
+
+    return NULL;
+}
+
+int write_to_fd(struct filedesc* fd, const char* buf, int size) {
+    assert(fd != NULL);
+    assert(fd->file != NULL);
+
+    int result_written = 0;
+
+    struct file* f = fd->file;
+    struct block* b_to_write = get_block_by_i(f, fd->ptr_block_i);
+
+    const char* c = buf;
+    while (result_written < size) {
+        assert(*c != '\0');
+        // block* b_to_write;
+        // int block_offset;
+//        fd->ptr_block_offset
+
+        assert(fd->ptr_block_offset <= BLOCK_SIZE); // CHECK FOR ptr NOT EXCEEDING BORDER
+
+        if (fd->ptr_block_offset == BLOCK_SIZE) { // END OF CUR BLOCK
+            if (b_to_write->next == NULL) { // APPENDING NEW BLOCK
+                add_block(f);
+
+                assert(b_to_write->next != NULL);
+                b_to_write = b_to_write->next;
+            }
+            fd->ptr_block_i++;
+            fd->ptr_block_offset = 0;
+        }
+
+        b_to_write->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
+        result_written++;
+
+        fd->ptr_block_offset++;
+        b_to_write->occupied++;
+        c++;
+    }
+
+    return result_written;
 }
 
 struct file* find_existing_filename(struct file *f_list, const char* filename) {
@@ -253,7 +329,7 @@ ufs_open(const char *filename, int flags)
 //	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
 //	return -1;
 
-    printf("OPEN: %s, %d\n", filename, flags);
+    printf("\n======== OPEN: %s, %d\n", filename, flags);
 
     //    static struct file *file_list = NULL;
     struct file *existing_file = find_existing_filename(file_list, filename);
@@ -264,15 +340,17 @@ ufs_open(const char *filename, int flags)
         if (existing_file == NULL) {
             res_file = init_file(filename, NULL, NULL);
             add_file_to_list(res_file, &file_list);
+        } else {
+            res_file = existing_file;
         }
     } else if (flags == 0) {                                        // OPEN EXISTING
         if (existing_file == NULL) {
             ufs_error_code = UFS_ERR_NO_FILE;
             return -1;
+        } else {
+            res_file = existing_file;
+            res_file->refs++;
         }
-
-        res_file = existing_file;
-        res_file->refs++;
     }
 
     res_fd = init_fd(res_file);
@@ -281,36 +359,56 @@ ufs_open(const char *filename, int flags)
 }
 
 ssize_t
-ufs_write(int fd, const char *buf, size_t size)
+ufs_write(int i, const char *buf, size_t size)
 {
 
-    printf("WRITE: %d, %s, %lu\n", fd, buf, size);
+    printf("\n======== WRITE: %d, %s, %lu\n", i, buf, size);
 
 	/* IMPLEMENT THIS FUNCTION */
-	(void)fd;
-	(void)buf;
-	(void)size;
-	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-	return -1;
+//	(void)fd;
+//	(void)buf;
+//	(void)size;
+//	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
+//	return -1;
+
+    struct filedesc* fd = get_fd(i);
+
+    if (fd == NULL) {
+        ufs_error_code = UFS_ERR_NO_FILE;
+        return -1;
+    }
+
+    if (buf == NULL) {
+        return -1; // ?
+    }
+
+    return write_to_fd(fd, buf, size);
 }
 
 ssize_t
-ufs_read(int fd, char *buf, size_t size)
+ufs_read(int i, char *buf, size_t size)
 {
-    printf("READ: %d, %s, %lu\n", fd, buf, size);
+    printf("\n======== READ: %d, %s, %lu\n", i, buf, size);
 
 	/* IMPLEMENT THIS FUNCTION */
-	(void)fd;
-	(void)buf;
-	(void)size;
-	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-	return -1;
+//	(void)fd;
+//	(void)buf;
+//	(void)size;
+//	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
+//	return -1;
+
+    struct filedesc* fd = get_fd(i);
+
+    if (fd == NULL) {
+        ufs_error_code = UFS_ERR_NO_FILE;
+        return -1;
+    }
 }
 
 int
 ufs_close(int fd)
 {
-    printf("CLOSE: %d\n", fd);
+    printf("\n======== CLOSE: %d\n", fd);
 	/* IMPLEMENT THIS FUNCTION */
 //	(void)fd;
 
@@ -323,7 +421,7 @@ ufs_close(int fd)
 int
 ufs_delete(const char *filename)
 {
-    printf("DELETE: %s\n", filename);
+    printf("\n======== DELETE: %s\n", filename);
 	/* IMPLEMENT THIS FUNCTION */
 //	(void)filename;
 //	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
