@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "my.c"
 
@@ -60,6 +61,8 @@ struct filedesc {
     int ptr_block_i;
     int ptr_block_offset;
 
+    int deleted;
+
 	/* PUT HERE OTHER MEMBERS */
 };
 
@@ -73,9 +76,59 @@ static struct filedesc **file_descriptors = NULL;
 static int file_descriptor_count = 0;
 static int file_descriptor_capacity = 0;
 
+void print_block(struct block* b) {
+    printf("    -BLOCK-: %p\n", b);
+    printf("        %p <-prev next-> %p\n", b->prev, b->next);
+    printf("        MEM: %d, '%s'\n", b->occupied, b->memory);
+}
+
+void print_file(struct file* f) {
+    printf("-FILE-: %s\n", f->name);
+
+    struct block* bi = f->block_list;
+    while (1) {
+        print_block(bi);
+
+        if (bi->next == NULL) {
+            break;
+        }
+        bi = bi->next;
+    }
+
+    printf("REFS: %d\n", f->refs);
+}
+
+void print_fd(struct filedesc* fd) {
+    if (fd == NULL) {
+        printf("-FD-: NULL\n");
+        return;
+    }
+    assert(fd->file != NULL);
+
+    printf("-FD-: -> '%s'\n", fd->file->name);
+    printf("    I, OFFSET: %d, %d\n", fd->ptr_block_i, fd->ptr_block_offset);
+}
+
+void print_debug() {
+    printf("============================================DEBUG===============================================\n");
+    printf("__FD LIST__\n");
+    for (int i = 0; i < file_descriptor_capacity; ++i) {
+        printf("%d: ", i);
+        print_fd(file_descriptors[i]);
+    }
+
+    printf("\n\n\n__FILES__\n");
+    struct file* f = file_list;
+    while (f != NULL) {
+        print_file(f);
+        f = f->next;
+    }
+    printf("============================================ ||| ===============================================\n");
+}
+
 struct block* init_block(struct block* prev, struct block* next) {
     struct block* b = malloc(sizeof(struct block));
-    b->memory = malloc(BLOCK_SIZE * sizeof(char));
+    b->memory = calloc(BLOCK_SIZE, sizeof(char));
     b->occupied = 0;
     b->next = next;
     b->prev = prev;
@@ -85,7 +138,8 @@ struct block* init_block(struct block* prev, struct block* next) {
 
 struct file* init_file(const char* filename, struct file* prev, struct file* next) {
     struct file* f = malloc(sizeof(struct file));
-    f->name = (char *) filename;
+    f->name = calloc(strlen(filename), sizeof(char));
+    strcpy(f->name, filename);
 
     struct block* b = init_block(NULL, NULL);
     f->block_list = b;
@@ -103,6 +157,7 @@ struct filedesc* init_fd(struct file* f) {
     fd->file = f;
     fd->ptr_block_i = 0;
     fd->ptr_block_offset = 0;
+    fd->deleted = 0;
 
     return fd;
 }
@@ -123,13 +178,18 @@ void free_file(struct file* f) {
 
         bi = bi->next;
     }
+    free(f->name);
     free(f);
 }
 
 void free_file_desc(struct filedesc* fd) {
     assert(fd != NULL);
 //    assert(*fd != NULL);
-    free(fd);
+//    fd->file = NULL;
+//    fd->ptr_block_offset = -1;
+//    fd->ptr_block_i = -1;
+//    fd->deleted = 1;
+//    free(fd);
 }
 
 void add_block(struct file* f) {
@@ -173,13 +233,17 @@ int add_fd_to_list(struct filedesc* fd) {
         while (ii < file_descriptor_capacity) {
             struct filedesc* fdi = file_descriptors[ii];
             if (fdi == NULL) {
+                if (ii == 0) {
+                    printf("ADD FD TO ARR: 0, %p\n", fd);
+                }
                 file_descriptors[ii] = fd;
                 return ii;
             }
             ii++;
         }
 
-        file_descriptors = realloc(file_descriptors, file_descriptor_capacity * sizeof(struct filedesc*));
+//        printf("fd_capacity: %d, %lu\n", file_descriptor_capacity, (file_descriptor_capacity + 1) * sizeof(struct filedesc*));
+        file_descriptors = realloc(file_descriptors, (file_descriptor_capacity + 1) * sizeof(struct filedesc*));
         file_descriptors[file_descriptor_capacity] = fd;
     }
 
@@ -213,7 +277,7 @@ void remove_fd_from_list_by_i(int i) {
 
 void destroy_file(struct file* f) {
     remove_file_from_list(f, &file_list);
-    free_file(f);
+//    free_file(f); // TODO add to "ghost" files
 }
 
 struct filedesc* get_fd(int i) {
@@ -230,9 +294,15 @@ int destroy_fd(int i) {
         return -1;
     }
 
+    assert(fd->file != NULL);
     fd->file->refs--;
-    free_file_desc(fd);
     remove_fd_from_list_by_i(i);
+
+    if (i == 0) {
+        printf("DESTROY FD: 0, %p\n", fd);
+    }
+
+    free_file_desc(fd);
 
     return 0;
 }
@@ -265,44 +335,82 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
     int result_written = 0;
 
     struct file* f = fd->file;
-    struct block* b_to_write = get_block_by_i(f, fd->ptr_block_i);
+    struct block* b_cur = get_block_by_i(f, fd->ptr_block_i);
 
     const char* c = buf;
     while (result_written < size) {
-        assert(*c != '\0');
-        // block* b_to_write;
+//        assert(*c != '\0');
+        // block* b_cur;
         // int block_offset;
 //        fd->ptr_block_offset
 
         assert(fd->ptr_block_offset <= BLOCK_SIZE); // CHECK FOR ptr NOT EXCEEDING BORDER
 
         if (fd->ptr_block_offset == BLOCK_SIZE) { // END OF CUR BLOCK
-            if (b_to_write->next == NULL) { // APPENDING NEW BLOCK
+            if (b_cur->next == NULL) { // APPENDING NEW BLOCK
                 add_block(f);
 
-                assert(b_to_write->next != NULL);
-                b_to_write = b_to_write->next;
+                assert(b_cur->next != NULL);
+                b_cur = b_cur->next;
             }
             fd->ptr_block_i++;
             fd->ptr_block_offset = 0;
         }
 
-        b_to_write->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
+        b_cur->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
         result_written++;
 
         fd->ptr_block_offset++;
-        b_to_write->occupied++;
+        b_cur->occupied = fmax(b_cur->occupied, fd->ptr_block_offset);
         c++;
     }
 
     return result_written;
 }
 
+int read_from_fd(struct filedesc* fd, char* out_buf, int n) {
+    assert(fd != NULL);
+    assert(fd->file != NULL);
+
+    int result_read = 0;
+
+    struct file* f = fd->file;
+    struct block* b_cur = get_block_by_i(f, fd->ptr_block_i);
+
+    while (result_read < n) { // NOT read REQUESTED COUNT
+        assert(fd->ptr_block_offset <= BLOCK_SIZE); // CHECK FOR ptr NOT EXCEEDING BORDER on more than 1
+//        assert(fd->ptr_block_offset <= b_cur->occupied);
+
+        if (fd->ptr_block_offset == b_cur->occupied && b_cur->occupied != BLOCK_SIZE) { // REACHED 'EOF'
+            break;
+        }
+
+
+        if (fd->ptr_block_offset == BLOCK_SIZE) { // END OF CUR BLOCK
+            if (b_cur->next == NULL) { // THIS IS LAST BLOCK
+                break;
+            } else {
+                b_cur = b_cur->next; // MOVING TO NEXT BLOCK
+                fd->ptr_block_i++;
+                fd->ptr_block_offset = 0;
+            }
+        }
+
+        out_buf[result_read] = b_cur->memory[fd->ptr_block_offset]; // READING CHAR
+//        b_cur->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
+        result_read++;
+
+        fd->ptr_block_offset++;
+    }
+
+    return result_read;
+}
+
 struct file* find_existing_filename(struct file *f_list, const char* filename) {
     struct file* fi = f_list;
 
     while (fi != NULL) {
-        if (fi->name == filename) {
+        if (strcmp(fi->name, filename) == 0) {
             return fi;
         }
         fi = fi->next;
@@ -330,6 +438,7 @@ ufs_open(const char *filename, int flags)
 //	return -1;
 
     printf("\n======== OPEN: %s, %d\n", filename, flags);
+//    print_debug();
 
     //    static struct file *file_list = NULL;
     struct file *existing_file = find_existing_filename(file_list, filename);
@@ -362,7 +471,8 @@ ssize_t
 ufs_write(int i, const char *buf, size_t size)
 {
 
-    printf("\n======== WRITE: %d, %s, %lu\n", i, buf, size);
+//    printf("\n======== WRITE: %d, %s, %lu\n", i, buf, size);
+//    print_debug();
 
 	/* IMPLEMENT THIS FUNCTION */
 //	(void)fd;
@@ -388,7 +498,8 @@ ufs_write(int i, const char *buf, size_t size)
 ssize_t
 ufs_read(int i, char *buf, size_t size)
 {
-    printf("\n======== READ: %d, %s, %lu\n", i, buf, size);
+//    printf("\n======== READ: %d, %s, %lu\n", i, buf, size);
+//    print_debug();
 
 	/* IMPLEMENT THIS FUNCTION */
 //	(void)fd;
@@ -403,6 +514,11 @@ ufs_read(int i, char *buf, size_t size)
         ufs_error_code = UFS_ERR_NO_FILE;
         return -1;
     }
+
+
+    int res = read_from_fd(fd, buf, size);
+//    printf("RES READ: '%s', %d\n", buf, res);
+    return res;
 }
 
 int
