@@ -57,6 +57,9 @@ static struct file *file_list = NULL;
 struct filedesc {
 	struct file *file;
 
+    int ptr_block_i;
+    int ptr_block_offset;
+
 	/* PUT HERE OTHER MEMBERS */
 };
 
@@ -98,15 +101,10 @@ struct file* init_file(const char* filename, struct file* prev, struct file* nex
 struct filedesc* init_fd(struct file* f) {
     struct filedesc* fd = malloc(sizeof(struct filedesc));
     fd->file = f;
+    fd->ptr_block_i = 0;
+    fd->ptr_block_offset = 0;
 
     return fd;
-}
-
-void add_block(struct file* f) {
-    struct block* b = init_block(f->last_block, NULL);
-
-    f->last_block->next = b;
-    f->last_block = b;
 }
 
 void free_block(struct block* b) {
@@ -116,7 +114,7 @@ void free_block(struct block* b) {
 
 void free_file(struct file* f) {
     struct block* bi = f->block_list;
-    while (bi != NULL || bi <= f->last_block) {
+    while (bi <= f->last_block) {
         free_block(bi);
         bi++;
     }
@@ -124,25 +122,16 @@ void free_file(struct file* f) {
 }
 
 void free_file_desc(struct filedesc* fd) {
+    assert(fd != NULL);
+//    assert(*fd != NULL);
     free(fd);
 }
 
-void remove_file_from_list(struct file* f, struct file** f_list) {
-    if (!f->next && !f->prev) {
-        *f_list = NULL;
-    }
-    if (f->next && !f->prev) {
-        f->next->prev = NULL;
-    }
-    if (!f->next && f->prev) {
-        f->prev->next = NULL;
-    }
-    if (f->next && f->prev) {
-        f->prev->next = f->next;
-        f->next->prev = f->prev;
-    }
+void add_block(struct file* f) {
+    struct block* b = init_block(f->last_block, NULL);
 
-    free_file(f);
+    f->last_block->next = b;
+    f->last_block = b;
 }
 
 void add_file_to_list(struct file* f, struct file** f_list) {
@@ -163,40 +152,6 @@ void add_file_to_list(struct file* f, struct file** f_list) {
 
     f_i->next = f;
     f->prev = f_i;
-}
-
-void remove_fd_from_list(struct filedesc* fd) {
-    assert(file_descriptors != NULL);
-    assert(file_descriptor_count > 0);
-    assert(file_descriptor_capacity > 0);
-
-    struct filedesc* fdi = file_descriptors[0];
-    int i = 0;
-
-    while (i < file_descriptor_capacity) {
-        if (fdi == fd) {
-            free_file_desc(fd);
-            file_descriptor_count--;
-            file_descriptors[i] = NULL;
-        }
-
-        fdi++;
-        i++;
-    }
-}
-
-void remove_fd_from_list_by_i(int i) {
-    assert(file_descriptors != NULL);
-    assert(file_descriptor_count > 0);
-    assert(file_descriptor_capacity > 0);
-
-    file_descriptors[i] = NULL;
-    file_descriptor_count--;
-}
-
-void destroy_fd(int i) {
-    free_file_desc(file_descriptors[i]);
-    remove_fd_from_list_by_i(i);
 }
 
 int add_fd_to_list(struct filedesc* fd) {
@@ -224,6 +179,47 @@ int add_fd_to_list(struct filedesc* fd) {
     }
 
     return file_descriptor_capacity++;
+}
+
+void remove_file_from_list(struct file* f, struct file** f_list) {
+    if (!f->next && !f->prev) {
+        *f_list = NULL;
+    }
+    if (f->next && !f->prev) {
+        f->next->prev = NULL;
+    }
+    if (!f->next && f->prev) {
+        f->prev->next = NULL;
+    }
+    if (f->next && f->prev) {
+        f->prev->next = f->next;
+        f->next->prev = f->prev;
+    }
+}
+
+void remove_fd_from_list_by_i(int i) {
+    assert(file_descriptors != NULL);
+    assert(file_descriptor_count > 0);
+    assert(file_descriptor_capacity > 0);
+
+    file_descriptors[i] = NULL;
+    file_descriptor_count--;
+}
+
+void destroy_file(struct file* f) {
+    remove_file_from_list(f, &file_list);
+    free_file(f);
+}
+
+int destroy_fd(int i) {
+    if (i < 0 || i >= file_descriptor_capacity || file_descriptors[i] == NULL) {
+        return -1;
+    }
+
+    free_file_desc(file_descriptors[i]);
+    remove_fd_from_list_by_i(i);
+
+    return 0;
 }
 
 struct file* find_existing_filename(struct file *f_list, const char* filename) {
@@ -321,8 +317,7 @@ ufs_close(int fd)
 //	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
 //	return -1;
 
-    destroy_fd(fd);
-    return 0;
+    return destroy_fd(fd);
 }
 
 int
@@ -330,9 +325,19 @@ ufs_delete(const char *filename)
 {
     printf("DELETE: %s\n", filename);
 	/* IMPLEMENT THIS FUNCTION */
-	(void)filename;
-	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-	return -1;
+//	(void)filename;
+//	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
+//	return -1;
+
+    struct file *existing_file = find_existing_filename(file_list, filename);
+
+    if (existing_file == NULL) {
+        ufs_error_code = UFS_ERR_NO_FILE;
+        return -1;
+    } else {
+        destroy_file(existing_file);
+        return 0;
+    }
 }
 
 void
