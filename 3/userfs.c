@@ -85,7 +85,7 @@ char* get_memory(struct block* b) {
 void print_block(struct block* b) {
     printf("    -BLOCK-: %p\n", b);
     printf("        %p <-prev next-> %p\n", b->prev, b->next);
-    printf("        MEM: %d, '%.10s'\n", b->occupied, get_memory(b));
+    printf("        MEM: %d, '%.512s'\n", b->occupied, get_memory(b));
 }
 
 void print_file(struct file* f) {
@@ -224,6 +224,19 @@ void add_block(struct file* f) {
 
     f->last_block->next = b;
     f->last_block = b;
+}
+
+void remove_block(struct file* f) {
+    assert(f->blocks_count > 1);
+
+    f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count - 1) * BLOCK_SIZE);
+
+    struct block* new_last_b = f->last_block->prev;
+    new_last_b->next = NULL;
+    free_block(f->last_block);
+    f->last_block = new_last_b;
+
+    f->blocks_count--;
 }
 
 void add_file_to_list(struct file* f, struct file** flist_ptr) {
@@ -404,6 +417,56 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
     return result_written;
 }
 
+int truncate_from_fd(struct filedesc* fd, int size) {
+    assert(fd != NULL);
+    assert(fd->file != NULL);
+
+    int result_trunc = 0;
+
+    struct file* f = fd->file;
+    int filesize = get_size(f);
+    int new_size = filesize - size;
+//    struct block* b_cur = get_block_by_i(f, fd->ptr_block_i);
+
+    struct block* b_cur = f->last_block;
+    fd->ptr_block_i = f->blocks_count - 1;
+    fd->ptr_block_offset = b_cur->occupied;
+
+    while (result_trunc < size) {
+        if (filesize == 0) {
+            ufs_error_code = UFS_ERR_NO_MEM;
+            return -1;
+        }
+
+        assert(fd->ptr_block_offset >= 0); // CHECK FOR ptr NOT EXCEEDING (left) BORDER
+
+        if (fd->ptr_block_offset == 0) { // ->START OF CUR BLOCK
+            if (b_cur->prev == NULL) { // REACHED START OF FILE
+                assert(f->blocks_count == 1);
+                break;
+            }
+            fd->ptr_block_i--;
+            fd->ptr_block_offset = BLOCK_SIZE;
+
+            remove_block(f);
+            b_cur = f->last_block;
+        }
+
+        char* b_mem = get_memory(b_cur);
+
+        b_mem[fd->ptr_block_offset - 1] = '\0'; // TRUNCATING CHAR
+        result_trunc++;
+        filesize--;
+        fd->ptr_block_offset--;
+
+        b_cur->occupied = fmin(b_cur->occupied, fd->ptr_block_offset);
+    }
+
+    assert(get_size(f) == new_size);
+
+    return result_trunc;
+}
+
 int read_from_fd(struct filedesc* fd, char* out_buf, int n) {
     assert(fd != NULL);
     assert(fd->file != NULL);
@@ -450,6 +513,79 @@ struct file* find_existing_filename(struct file *f_list, const char* filename) {
         fi = fi->next;
     }
     return NULL;
+}
+
+int* fds_pointing_file(struct file* f) {
+    int* res_arr = malloc(file_descriptor_capacity * sizeof(int));
+    int ra_i = 0;
+
+    for (int i = 0; i < file_descriptor_capacity; ++i) {
+        struct filedesc* fd = get_fd(i);
+        if (fd != NULL) {
+            if (fd->file == f) {
+                res_arr[ra_i] = i;
+                ra_i++;
+            }
+        }
+    }
+    res_arr[ra_i] = -1;
+    return res_arr;
+}
+
+int resize_fd(struct filedesc* fd, size_t new_size) {
+    struct file* f = fd->file;
+    assert(f != NULL);
+
+    int diff = (int) new_size - get_size(f);
+
+    if (diff == 0) { return 0; }
+
+    if (diff > 0) {
+        int old_ptr_block_i = fd->ptr_block_i;
+        int old_ptr_block_offset = fd->ptr_block_offset;
+
+        char* buf = calloc(diff, sizeof(char));
+        int write_res = write_to_fd(fd, buf, diff);
+
+        fd->ptr_block_i = old_ptr_block_i;
+        fd->ptr_block_offset = old_ptr_block_offset;
+
+        if (write_res < 0) {
+            return write_res;
+        }
+    } else {
+        int res_trunc = truncate_from_fd(fd, -diff);
+
+        int* related_fds = fds_pointing_file(f);
+
+        int i = 0;
+        while (related_fds[i] != -1) {
+            int fdi = related_fds[i];
+            struct filedesc* fdi_obj = get_fd(fdi);
+
+//            fdi_obj->ptr_block_offset = 0;
+//            fdi_obj->ptr_block_i = 0;
+
+            if (fdi_obj != fd) {
+                if (fdi_obj->ptr_block_i == fd->ptr_block_i) {
+                    fdi_obj->ptr_block_offset = fmin(fdi_obj->ptr_block_offset, fd->ptr_block_offset);
+                } else if (fdi_obj->ptr_block_i > fd->ptr_block_i) {
+                    fdi_obj->ptr_block_i = fmin(fdi_obj->ptr_block_i, fd->ptr_block_i);
+                    fdi_obj->ptr_block_offset = fd->ptr_block_offset;
+                }
+            }
+            i++;
+        }
+
+        fd->ptr_block_offset = 0;
+        fd->ptr_block_i = 0;
+
+        free(related_fds);
+
+        if (res_trunc < 0) { return res_trunc; }
+    }
+
+    return 0;
 }
 
 enum ufs_error_code
@@ -602,4 +738,24 @@ ufs_destroy(void)
     }
 
     free(file_descriptors);
+}
+
+int
+ufs_resize(int i, size_t new_size)
+{
+    struct filedesc* fd = get_fd(i);
+
+    if (fd == NULL) {
+        ufs_error_code = UFS_ERR_NO_FILE;
+        return -1;
+    }
+
+//    printf("=======BEFORE RESIZE: %d=======\n", new_size);
+//    print_file(fd->file);
+
+    int res_resize = resize_fd(fd, new_size);
+//    printf("======AFTER RESIZE======\n");
+//    print_file(fd->file);
+
+    return res_resize;
 }
