@@ -63,6 +63,8 @@ struct filedesc {
 
     int ptr_block_i;
     int ptr_block_offset;
+
+    int flags;
 };
 
 /**
@@ -475,7 +477,7 @@ ufs_open(const char *filename, int flags)
         } else {
             res_file = existing_file;
         }
-    } else if (flags == 0) {        // OPEN EXISTING
+    } else if (flags != -1) {        // OPEN EXISTING
         if (existing_file == NULL) {
             ufs_error_code = UFS_ERR_NO_FILE;
             return -1;
@@ -486,6 +488,8 @@ ufs_open(const char *filename, int flags)
     }
 
     res_fd = init_fd(res_file);
+    res_fd->flags = flags;
+
     int fd_i = add_fd_to_list(res_fd);
     return fd_i;
 }
@@ -506,6 +510,11 @@ ufs_write(int i, const char *buf, size_t size)
 
     if (fd == NULL) {
         ufs_error_code = UFS_ERR_NO_FILE;
+        return -1;
+    }
+
+    if (fd->flags == UFS_READ_ONLY) {
+        ufs_error_code = UFS_ERR_NO_PERMISSION;
         return -1;
     }
 
@@ -532,6 +541,10 @@ ufs_read(int i, char *buf, size_t size)
         return -1;
     }
 
+    if (fd->flags == UFS_WRITE_ONLY) {
+        ufs_error_code = UFS_ERR_NO_PERMISSION;
+        return -1;
+    }
 
     int res = read_from_fd(fd, buf, size);
 //    printf("RES READ: '%s', %d\n", buf, res);
