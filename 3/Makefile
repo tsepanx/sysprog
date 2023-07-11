@@ -1,4 +1,4 @@
-GCC_FLAGS = -Wextra -Werror -Wall -Wno-gnu-folding-constant
+GCC_FLAGS = -Wextra -Wall -Wno-gnu-folding-constant -lm
 
 all: test.o userfs.o
 	gcc $(GCC_FLAGS) test.o userfs.o

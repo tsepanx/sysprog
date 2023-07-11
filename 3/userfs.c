@@ -77,11 +77,6 @@ static struct filedesc **file_descriptors = NULL;
 static int file_descriptor_count = 0;
 static int file_descriptor_capacity = 0;
 
-//char* get_memory(struct block* b) {
-//    char* res = *(b->file_memory_ptr) + (b->i * BLOCK_SIZE);
-//    return res;
-//}
-
 void print_block(struct block* b) {
     printf("    -BLOCK-: %p\n", b);
     printf("        %p <-prev next-> %p\n", b->prev, b->next);
@@ -135,8 +130,6 @@ void print_debug() {
 struct block* init_block(struct block* prev, struct block* next, int i) {
     struct block* b = malloc(sizeof(struct block));
     b->memory = calloc(BLOCK_SIZE, sizeof(char));
-//    b->memory = file_memory_ptr;
-//    b->file_memory_ptr = file_memory_ptr;
     b->occupied = 0;
     b->next = next;
     b->prev = prev;
@@ -149,9 +142,6 @@ struct file* init_file(const char* filename, struct file* prev, struct file* nex
     struct file* f = malloc(sizeof(struct file));
     f->name = calloc(strlen(filename), sizeof(char));
     strcpy(f->name, filename);
-
-//    f->blocks_count = 1;
-//    f->memory_ptr = malloc(1 * BLOCK_SIZE * sizeof(char));
 
     struct block* b = init_block(NULL, NULL, 0);
     f->block_list = b;
@@ -207,7 +197,6 @@ void free_file(struct file* f) {
         i++;
     }
     free(f->name);
-//    free(f->memory_ptr);
     free(f);
 }
 
@@ -217,10 +206,6 @@ void free_file_desc(struct filedesc* fd) {
 }
 
 void add_block(struct file* f) {
-//    f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count + 1) * BLOCK_SIZE);
-//
-//    struct block* b = init_block(f->last_block, NULL, &f->memory_ptr, f->blocks_count);
-//    f->blocks_count++;
     struct block* b = init_block(f->last_block, NULL, f->last_block->i + 1);
 
     f->last_block->next = b;
@@ -228,16 +213,11 @@ void add_block(struct file* f) {
 }
 
 void remove_block(struct file* f) {
-//    assert(f->blocks_count > 1);
-
-//    f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count - 1) * BLOCK_SIZE);
-
     struct block* new_last_b = f->last_block->prev;
     new_last_b->next = NULL;
     free_block(f->last_block);
     f->last_block = new_last_b;
 
-//    f->blocks_count--;
 }
 
 void add_file_to_list(struct file* f, struct file** flist_ptr) {
@@ -285,22 +265,6 @@ int add_fd_to_list(struct filedesc* fd) {
     }
 
     return file_descriptor_capacity++;
-}
-
-void remove_file_from_list(struct file* f, struct file** f_list) {
-    if (!f->next && !f->prev) {
-        *f_list = NULL;
-    }
-    if (f->next && !f->prev) {
-        f->next->prev = NULL;
-    }
-    if (!f->next && f->prev) {
-        f->prev->next = NULL;
-    }
-    if (f->next && f->prev) {
-        f->prev->next = f->next;
-        f->next->prev = f->prev;
-    }
 }
 
 void remove_fd_from_list_by_i(int i) {
@@ -404,9 +368,6 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
             fd->ptr_block_offset = 0;
         }
 
-//        char* b_mem = get_memory(b_cur);
-
-//        b_mem[fd->ptr_block_offset] = *c; // WRITING CHAR
         b_cur->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
         result_written++;
         filesize++;
@@ -428,10 +389,8 @@ int truncate_from_fd(struct filedesc* fd, int size) {
     struct file* f = fd->file;
     int filesize = get_size(f);
     int new_size = filesize - size;
-//    struct block* b_cur = get_block_by_i(f, fd->ptr_block_i);
 
     struct block* b_cur = f->last_block;
-//    fd->ptr_block_i = f->blocks_count - 1;
     fd->ptr_block_i = f->last_block->i;
     fd->ptr_block_offset = b_cur->occupied;
 
@@ -455,9 +414,6 @@ int truncate_from_fd(struct filedesc* fd, int size) {
             b_cur = f->last_block;
         }
 
-//        char* b_mem = get_memory(b_cur);
-
-//        b_mem[fd->ptr_block_offset - 1] = '\0'; // TRUNCATING CHAR
         b_cur->memory[fd->ptr_block_offset - 1] = '\0';
         result_trunc++;
         filesize--;
@@ -498,7 +454,6 @@ int read_from_fd(struct filedesc* fd, char* out_buf, int n) {
             }
         }
 
-//        out_buf[result_read] = get_memory(b_cur)[fd->ptr_block_offset]; // READING CHAR
         out_buf[result_read] = b_cur->memory[fd->ptr_block_offset]; // READING CHAR
         result_read++;
 
@@ -559,6 +514,9 @@ int resize_fd(struct filedesc* fd, size_t new_size) {
             return write_res;
         }
     } else {
+        int old_ptr_block_offset = fd->ptr_block_offset;
+        int old_ptr_block_i = fd->ptr_block_i;
+
         int res_trunc = truncate_from_fd(fd, -diff);
 
         int* related_fds = fds_pointing_file(f);
@@ -567,9 +525,6 @@ int resize_fd(struct filedesc* fd, size_t new_size) {
         while (related_fds[i] != -1) {
             int fdi = related_fds[i];
             struct filedesc* fdi_obj = get_fd(fdi);
-
-//            fdi_obj->ptr_block_offset = 0;
-//            fdi_obj->ptr_block_i = 0;
 
             if (fdi_obj != fd) {
                 if (fdi_obj->ptr_block_i == fd->ptr_block_i) {
@@ -755,12 +710,6 @@ ufs_resize(int i, size_t new_size)
         return -1;
     }
 
-//    printf("=======BEFORE RESIZE: %d=======\n", new_size);
-//    print_file(fd->file);
-
     int res_resize = resize_fd(fd, new_size);
-//    printf("======AFTER RESIZE======\n");
-//    print_file(fd->file);
-
     return res_resize;
 }
