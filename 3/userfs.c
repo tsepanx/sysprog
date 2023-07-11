@@ -1,7 +1,4 @@
 
-//#ifndef AAA
-//#define AAA
-
 #include "userfs.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -11,9 +8,6 @@
 #include <string.h>
 #include <bits/time.h>
 #include <time.h>
-#include <unistd.h>
-
-#include "my.c"
 
 enum {
 	BLOCK_SIZE = 512,
@@ -65,12 +59,10 @@ static struct file *file_list = NULL;
 struct filedesc {
 	struct file *file;
 
+	/* PUT HERE OTHER MEMBERS */
+
     int ptr_block_i;
     int ptr_block_offset;
-
-    int deleted;
-
-	/* PUT HERE OTHER MEMBERS */
 };
 
 /**
@@ -175,7 +167,6 @@ struct filedesc* init_fd(struct file* f) {
     fd->file = f;
     fd->ptr_block_i = 0;
     fd->ptr_block_offset = 0;
-    fd->deleted = 0;
 
     return fd;
 }
@@ -206,15 +197,7 @@ void free_file(struct file* f) {
     struct block* bi = f->block_list;
 
     int i = 0;
-
-    double avg_blocks = (double) get_size(f) / BLOCK_SIZE;
-
-    printf("OVERALL BLOCKS: %f\n", avg_blocks);
-
     while (bi != NULL) {
-        if (i % 100 == 0) {
-            printf("FREEING BLOCK: %d\n", i);
-        }
         struct block* bn = bi->next;
         free_block(bi);
 
@@ -228,17 +211,11 @@ void free_file(struct file* f) {
 
 void free_file_desc(struct filedesc* fd) {
     assert(fd != NULL);
-//    assert(*fd != NULL);
-//    fd->file = NULL;
-//    fd->ptr_block_offset = -1;
-//    fd->ptr_block_i = -1;
-//    fd->deleted = 1;
     free(fd);
 }
 
 void add_block(struct file* f) {
     f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count + 1) * BLOCK_SIZE);
-//    char* new_mem_ptr = f->memory_ptr + (f->blocks_count * BLOCK_SIZE);
 
     struct block* b = init_block(f->last_block, NULL, &f->memory_ptr, f->blocks_count);
     f->blocks_count++;
@@ -287,7 +264,6 @@ int add_fd_to_list(struct filedesc* fd) {
             ii++;
         }
 
-//        printf("fd_capacity: %d, %lu\n", file_descriptor_capacity, (file_descriptor_capacity + 1) * sizeof(struct filedesc*));
         file_descriptors = realloc(file_descriptors, (file_descriptor_capacity + 1) * sizeof(struct filedesc*));
         file_descriptors[file_descriptor_capacity] = fd;
     }
@@ -334,10 +310,7 @@ unsigned long get_cur_time() {
 void destroy_file(struct file* f) {
     f->name = realloc(f->name, strlen(f->name) + 100);
 
-    sprintf(f->name, "%s__ghost_file_time_%lu", f->name, get_cur_time());
-//    printf("NEW FNAME: %s\n", f->name);
-//    remove_file_from_list(f, &file_list);
-//    free_file(f); // ODO add to "ghost" files
+    sprintf(f->name, "%s__ghost_file_%lu", f->name, get_cur_time());
 }
 
 struct filedesc* get_fd(int i) {
@@ -357,10 +330,6 @@ int destroy_fd(int i) {
     assert(fd->file != NULL);
     fd->file->refs--;
     remove_fd_from_list_by_i(i);
-
-    if (i == 0) {
-        printf("DESTROY FD: 0, %p\n", fd);
-    }
 
     free_file_desc(fd);
 
@@ -398,14 +367,8 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
     int filesize = get_size(f);
     struct block* b_cur = get_block_by_i(f, fd->ptr_block_i);
 
-//    printf("FILESIZE: %s, %d\n", f->name, filesize);
-
     const char* c = buf;
     while (result_written < size) {
-//        assert(*c != '\0');
-        // block* b_cur;
-        // int block_offset;
-//        fd->ptr_block_offset
 
         if ((filesize + 1) > MAX_FILE_SIZE) {
             ufs_error_code = UFS_ERR_NO_MEM;
@@ -433,9 +396,7 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
 
         fd->ptr_block_offset++;
         b_cur->occupied = fmax(b_cur->occupied, fd->ptr_block_offset);
-//        printf("OCCUPIED CHANGE: %d\n", b_cur->occupied);
         c++;
-//        print_debug();
     }
 
     return result_written;
@@ -452,7 +413,6 @@ int read_from_fd(struct filedesc* fd, char* out_buf, int n) {
 
     while (result_read < n) { // NOT read REQUESTED COUNT
         assert(fd->ptr_block_offset <= BLOCK_SIZE); // CHECK FOR ptr NOT EXCEEDING BORDER on more than 1
-//        assert(fd->ptr_block_offset <= b_cur->occupied);
 
         if (fd->ptr_block_offset == b_cur->occupied && b_cur->occupied != BLOCK_SIZE) { // REACHED 'EOF'
             break;
@@ -470,7 +430,6 @@ int read_from_fd(struct filedesc* fd, char* out_buf, int n) {
         }
 
         out_buf[result_read] = get_memory(b_cur)[fd->ptr_block_offset]; // READING CHAR
-//        b_cur->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
         result_read++;
 
         fd->ptr_block_offset++;
@@ -501,19 +460,10 @@ int
 ufs_open(const char *filename, int flags)
 {
 	/* IMPLEMENT THIS FUNCTION */
-//	(void)filename;
-//	(void)flags;
-//	(void)file_list;
-//	(void)file_descriptors;
-//	(void)file_descriptor_count;
-//	(void)file_descriptor_capacity;
-//	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-//	return -1;
 
-    printf("\n======== OPEN: %s, %d\n", filename, flags);
+//    printf("\n======== OPEN: %s, %d\n", filename, flags);
 //    print_debug();
 
-    //    static struct file *file_list = NULL;
     struct file *existing_file = find_existing_filename(file_list, filename);
     struct file *res_file;
     struct filedesc *res_fd;
@@ -525,7 +475,7 @@ ufs_open(const char *filename, int flags)
         } else {
             res_file = existing_file;
         }
-    } else if (flags == 0) {                                        // OPEN EXISTING
+    } else if (flags == 0) {        // OPEN EXISTING
         if (existing_file == NULL) {
             ufs_error_code = UFS_ERR_NO_FILE;
             return -1;
@@ -543,15 +493,9 @@ ufs_open(const char *filename, int flags)
 ssize_t
 ufs_write(int i, const char *buf, size_t size)
 {
-
-    printf("\n======== WRITE: %d, %lu\n", i, size);
+//    printf("\n======== WRITE: %d, %lu\n", i, size);
 
 	/* IMPLEMENT THIS FUNCTION */
-//	(void)fd;
-//	(void)buf;
-//	(void)size;
-//	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-//	return -1;
 
     if (size > MAX_FILE_SIZE) {
         ufs_error_code = UFS_ERR_NO_MEM;
@@ -570,22 +514,16 @@ ufs_write(int i, const char *buf, size_t size)
     }
 
     int res = write_to_fd(fd, buf, size);
-//    print_debug();
     return res;
 }
 
 ssize_t
 ufs_read(int i, char *buf, size_t size)
 {
-    printf("\n======== READ: %d, %.5s, %lu\n", i, buf, size);
+//    printf("\n======== READ: %d, %.5s, %lu\n", i, buf, size);
 //    print_debug();
 
 	/* IMPLEMENT THIS FUNCTION */
-//	(void)fd;
-//	(void)buf;
-//	(void)size;
-//	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-//	return -1;
 
     struct filedesc* fd = get_fd(i);
 
@@ -605,10 +543,6 @@ ufs_close(int fd)
 {
 //    printf("\n======== CLOSE: %d\n", fd);
 	/* IMPLEMENT THIS FUNCTION */
-//	(void)fd;
-
-//	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-//	return -1;
 
     return destroy_fd(fd);
 }
@@ -618,9 +552,6 @@ ufs_delete(const char *filename)
 {
 //    printf("\n======== DELETE: %s\n", filename);
 	/* IMPLEMENT THIS FUNCTION */
-//	(void)filename;
-//	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-//	return -1;
 
     struct file *existing_file = find_existing_filename(file_list, filename);
 
@@ -636,11 +567,10 @@ ufs_delete(const char *filename)
 void
 ufs_destroy(void)
 {
-//    print_debug();
-    usleep(1000000);
+//    usleep(1000000);
     struct file* fi = file_list;
     while (fi != NULL) {
-        printf("FREEING FILE: %s\n", fi->name);
+//        printf("FREEING FILE: %s\n", fi->name);
         free_file(fi);
 
         fi = fi->next;
@@ -658,10 +588,5 @@ ufs_destroy(void)
         i++;
     }
 
-//    print_debug();
-
     free(file_descriptors);
 }
-
-
-//#endif
