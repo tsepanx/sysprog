@@ -537,8 +537,8 @@ int resize_fd(struct filedesc* fd, size_t new_size) {
             i++;
         }
 
-        fd->ptr_block_offset = 0;
-        fd->ptr_block_i = 0;
+        fd->ptr_block_offset = fmin(old_ptr_block_offset, fd->ptr_block_offset);
+        fd->ptr_block_i = fmin(old_ptr_block_i, fd->ptr_block_i);
 
         free(related_fds);
 
