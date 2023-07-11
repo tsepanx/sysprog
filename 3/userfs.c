@@ -9,6 +9,9 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <bits/time.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "my.c"
 
@@ -162,6 +165,23 @@ struct filedesc* init_fd(struct file* f) {
     return fd;
 }
 
+int get_size(struct file* f) {
+    assert(f->block_list != NULL);
+
+    int result_size = 0;
+
+    struct block* bi = f->block_list;
+    while (bi != NULL) {
+        if (bi->next != NULL) {
+            assert(bi->occupied == BLOCK_SIZE);
+        }
+
+        result_size += bi->occupied;
+        bi = bi->next;
+    }
+    return result_size;
+}
+
 void free_block(struct block* b) {
     free(b->memory);
     free(b);
@@ -169,14 +189,19 @@ void free_block(struct block* b) {
 
 void free_file(struct file* f) {
     struct block* bi = f->block_list;
-    while (1) {
+
+    int i = 0;
+
+    double avg_blocks = (double) get_size(f) / BLOCK_SIZE;
+
+    printf("OVERALL BLOCKS: %f\n", avg_blocks);
+
+    while (bi != NULL) {
+        printf("FREEING BLOCK: %d\n", i);
         free_block(bi);
 
-        if (bi->next == NULL) {
-            break;
-        }
-
         bi = bi->next;
+        i++;
     }
     free(f->name);
     free(f);
@@ -275,8 +300,23 @@ void remove_fd_from_list_by_i(int i) {
     file_descriptor_count--;
 }
 
+unsigned long microsec(struct timespec ts) {
+    return ts.tv_sec * (unsigned) 1e6 + ts.tv_nsec / (unsigned) 1e3;
+}
+
+unsigned long get_cur_time() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    return microsec(ts);
+}
+
 void destroy_file(struct file* f) {
-    remove_file_from_list(f, &file_list);
+    f->name = realloc(f->name, strlen(f->name) + 100);
+
+    sprintf(f->name, "%s__ghost_file_time_%lu", f->name, get_cur_time());
+//    printf("NEW FNAME: %s\n", f->name);
+//    remove_file_from_list(f, &file_list);
 //    free_file(f); // TODO add to "ghost" files
 }
 
@@ -326,23 +366,6 @@ struct block* get_block_by_i(struct file* f, int target_i) {
     }
 
     return NULL;
-}
-
-int get_size(struct file* f) {
-    assert(f->block_list != NULL);
-
-    int result_size = 0;
-
-    struct block* bi = f->block_list;
-    while (bi != NULL) {
-        if (bi->next != NULL) {
-            assert(bi->occupied == BLOCK_SIZE);
-        }
-
-        result_size += bi->occupied;
-        bi = bi->next;
-    }
-    return result_size;
 }
 
 int write_to_fd(struct filedesc* fd, const char* buf, int size) {
@@ -588,7 +611,29 @@ ufs_delete(const char *filename)
 void
 ufs_destroy(void)
 {
-    
+    print_debug();
+    usleep(5000000);
+    struct file* fi = file_list;
+    while (fi != NULL) {
+        printf("FREEING FILE: %s\n", fi->name);
+        free_file(fi);
+
+        fi = fi->next;
+    }
+
+    int i = 0;
+
+    while (i < file_descriptor_capacity) {
+        struct filedesc* fdi = file_descriptors[i];
+
+        if (fdi != NULL) {
+            printf("FREEING FD: %d\n", i);
+            free_file_desc(fdi);
+        } else {
+            printf("SKIPPING I: %d\n", i);
+        }
+        i++;
+    }
 }
 
 
