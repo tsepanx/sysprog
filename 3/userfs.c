@@ -25,7 +25,7 @@ static enum ufs_error_code ufs_error_code = UFS_ERR_NO_ERR;
 
 struct block {
 	/** Block memory. */
-	char *memory;
+//	char *memory;
 	/** How many bytes are occupied. */
 	int occupied;
 	/** Next block in the file. */
@@ -34,6 +34,8 @@ struct block {
 	struct block *prev;
 
 	/* PUT HERE OTHER MEMBERS */
+    int i;
+    char** file_memory_ptr;
 };
 
 struct file {
@@ -53,6 +55,8 @@ struct file {
 	struct file *prev;
 
 	/* PUT HERE OTHER MEMBERS */
+    int blocks_count;
+    char* memory_ptr;
 };
 
 /** List of all files. */
@@ -79,10 +83,15 @@ static struct filedesc **file_descriptors = NULL;
 static int file_descriptor_count = 0;
 static int file_descriptor_capacity = 0;
 
+char* get_memory(struct block* b) {
+    char* res = *(b->file_memory_ptr) + (b->i * BLOCK_SIZE);
+    return res;
+}
+
 void print_block(struct block* b) {
     printf("    -BLOCK-: %p\n", b);
     printf("        %p <-prev next-> %p\n", b->prev, b->next);
-    printf("        MEM: %d, '%.5s'\n", b->occupied, b->memory);
+    printf("        MEM: %d, '%.10s'\n", b->occupied, get_memory(b));
 }
 
 void print_file(struct file* f) {
@@ -129,12 +138,15 @@ void print_debug() {
     printf("============================================ ||| ===============================================\n");
 }
 
-struct block* init_block(struct block* prev, struct block* next) {
+struct block* init_block(struct block* prev, struct block* next, char** file_memory_ptr, int i) {
     struct block* b = malloc(sizeof(struct block));
-    b->memory = calloc(BLOCK_SIZE, sizeof(char));
+//    b->memory = calloc(BLOCK_SIZE, sizeof(char));
+//    b->memory = file_memory_ptr;
+    b->file_memory_ptr = file_memory_ptr;
     b->occupied = 0;
     b->next = next;
     b->prev = prev;
+    b->i = i;
 
     return b;
 }
@@ -144,7 +156,10 @@ struct file* init_file(const char* filename, struct file* prev, struct file* nex
     f->name = calloc(strlen(filename), sizeof(char));
     strcpy(f->name, filename);
 
-    struct block* b = init_block(NULL, NULL);
+    f->blocks_count = 1;
+    f->memory_ptr = malloc(1 * BLOCK_SIZE * sizeof(char));
+
+    struct block* b = init_block(NULL, NULL, &f->memory_ptr, 0);
     f->block_list = b;
     f->last_block = b;
     f->prev = prev;
@@ -183,7 +198,7 @@ int get_size(struct file* f) {
 }
 
 void free_block(struct block* b) {
-    free(b->memory);
+//    free(b->memory);
     free(b);
 }
 
@@ -197,13 +212,17 @@ void free_file(struct file* f) {
     printf("OVERALL BLOCKS: %f\n", avg_blocks);
 
     while (bi != NULL) {
-        printf("FREEING BLOCK: %d\n", i);
+        if (i % 100 == 0) {
+            printf("FREEING BLOCK: %d\n", i);
+        }
+        struct block* bn = bi->next;
         free_block(bi);
 
-        bi = bi->next;
+        bi = bn;
         i++;
     }
     free(f->name);
+    free(f->memory_ptr);
     free(f);
 }
 
@@ -214,11 +233,15 @@ void free_file_desc(struct filedesc* fd) {
 //    fd->ptr_block_offset = -1;
 //    fd->ptr_block_i = -1;
 //    fd->deleted = 1;
-//    free(fd);
+    free(fd);
 }
 
 void add_block(struct file* f) {
-    struct block* b = init_block(f->last_block, NULL);
+    f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count + 1) * BLOCK_SIZE);
+//    char* new_mem_ptr = f->memory_ptr + (f->blocks_count * BLOCK_SIZE);
+
+    struct block* b = init_block(f->last_block, NULL, &f->memory_ptr, f->blocks_count);
+    f->blocks_count++;
 
     f->last_block->next = b;
     f->last_block = b;
@@ -258,9 +281,6 @@ int add_fd_to_list(struct filedesc* fd) {
         while (ii < file_descriptor_capacity) {
             struct filedesc* fdi = file_descriptors[ii];
             if (fdi == NULL) {
-                if (ii == 0) {
-                    printf("ADD FD TO ARR: 0, %p\n", fd);
-                }
                 file_descriptors[ii] = fd;
                 return ii;
             }
@@ -317,7 +337,7 @@ void destroy_file(struct file* f) {
     sprintf(f->name, "%s__ghost_file_time_%lu", f->name, get_cur_time());
 //    printf("NEW FNAME: %s\n", f->name);
 //    remove_file_from_list(f, &file_list);
-//    free_file(f); // TODO add to "ghost" files
+//    free_file(f); // ODO add to "ghost" files
 }
 
 struct filedesc* get_fd(int i) {
@@ -405,13 +425,17 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
             fd->ptr_block_offset = 0;
         }
 
-        b_cur->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
+        char* b_mem = get_memory(b_cur);
+
+        b_mem[fd->ptr_block_offset] = *c; // WRITING CHAR
         result_written++;
         filesize++;
 
         fd->ptr_block_offset++;
         b_cur->occupied = fmax(b_cur->occupied, fd->ptr_block_offset);
+//        printf("OCCUPIED CHANGE: %d\n", b_cur->occupied);
         c++;
+//        print_debug();
     }
 
     return result_written;
@@ -445,7 +469,7 @@ int read_from_fd(struct filedesc* fd, char* out_buf, int n) {
             }
         }
 
-        out_buf[result_read] = b_cur->memory[fd->ptr_block_offset]; // READING CHAR
+        out_buf[result_read] = get_memory(b_cur)[fd->ptr_block_offset]; // READING CHAR
 //        b_cur->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
         result_read++;
 
@@ -520,8 +544,7 @@ ssize_t
 ufs_write(int i, const char *buf, size_t size)
 {
 
-//    printf("\n======== WRITE: %d, %lu\n", i, size);
-//    print_debug();
+    printf("\n======== WRITE: %d, %lu\n", i, size);
 
 	/* IMPLEMENT THIS FUNCTION */
 //	(void)fd;
@@ -543,16 +566,18 @@ ufs_write(int i, const char *buf, size_t size)
     }
 
     if (buf == NULL) {
-        return -1; // ?
+        return -1;
     }
 
-    return write_to_fd(fd, buf, size);
+    int res = write_to_fd(fd, buf, size);
+//    print_debug();
+    return res;
 }
 
 ssize_t
 ufs_read(int i, char *buf, size_t size)
 {
-//    printf("\n======== READ: %d, %s, %lu\n", i, buf, size);
+    printf("\n======== READ: %d, %.5s, %lu\n", i, buf, size);
 //    print_debug();
 
 	/* IMPLEMENT THIS FUNCTION */
@@ -611,8 +636,8 @@ ufs_delete(const char *filename)
 void
 ufs_destroy(void)
 {
-    print_debug();
-    usleep(5000000);
+//    print_debug();
+    usleep(1000000);
     struct file* fi = file_list;
     while (fi != NULL) {
         printf("FREEING FILE: %s\n", fi->name);
@@ -629,11 +654,13 @@ ufs_destroy(void)
         if (fdi != NULL) {
             printf("FREEING FD: %d\n", i);
             free_file_desc(fdi);
-        } else {
-            printf("SKIPPING I: %d\n", i);
         }
         i++;
     }
+
+//    print_debug();
+
+    free(file_descriptors);
 }
 
 
