@@ -79,7 +79,7 @@ static int file_descriptor_capacity = 0;
 void print_block(struct block* b) {
     printf("    -BLOCK-: %p\n", b);
     printf("        %p <-prev next-> %p\n", b->prev, b->next);
-    printf("        MEM: %d, '%s'\n", b->occupied, b->memory);
+    printf("        MEM: %d, '%.5s'\n", b->occupied, b->memory);
 }
 
 void print_file(struct file* f) {
@@ -328,6 +328,23 @@ struct block* get_block_by_i(struct file* f, int target_i) {
     return NULL;
 }
 
+int get_size(struct file* f) {
+    assert(f->block_list != NULL);
+
+    int result_size = 0;
+
+    struct block* bi = f->block_list;
+    while (bi != NULL) {
+        if (bi->next != NULL) {
+            assert(bi->occupied == BLOCK_SIZE);
+        }
+
+        result_size += bi->occupied;
+        bi = bi->next;
+    }
+    return result_size;
+}
+
 int write_to_fd(struct filedesc* fd, const char* buf, int size) {
     assert(fd != NULL);
     assert(fd->file != NULL);
@@ -335,7 +352,10 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
     int result_written = 0;
 
     struct file* f = fd->file;
+    int filesize = get_size(f);
     struct block* b_cur = get_block_by_i(f, fd->ptr_block_i);
+
+//    printf("FILESIZE: %s, %d\n", f->name, filesize);
 
     const char* c = buf;
     while (result_written < size) {
@@ -343,6 +363,11 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
         // block* b_cur;
         // int block_offset;
 //        fd->ptr_block_offset
+
+        if ((filesize + 1) > MAX_FILE_SIZE) {
+            ufs_error_code = UFS_ERR_NO_MEM;
+            return -1;
+        }
 
         assert(fd->ptr_block_offset <= BLOCK_SIZE); // CHECK FOR ptr NOT EXCEEDING BORDER
 
@@ -359,6 +384,7 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
 
         b_cur->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
         result_written++;
+        filesize++;
 
         fd->ptr_block_offset++;
         b_cur->occupied = fmax(b_cur->occupied, fd->ptr_block_offset);
@@ -471,7 +497,7 @@ ssize_t
 ufs_write(int i, const char *buf, size_t size)
 {
 
-//    printf("\n======== WRITE: %d, %s, %lu\n", i, buf, size);
+//    printf("\n======== WRITE: %d, %lu\n", i, size);
 //    print_debug();
 
 	/* IMPLEMENT THIS FUNCTION */
@@ -480,6 +506,11 @@ ufs_write(int i, const char *buf, size_t size)
 //	(void)size;
 //	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
 //	return -1;
+
+    if (size > MAX_FILE_SIZE) {
+        ufs_error_code = UFS_ERR_NO_MEM;
+        return -1;
+    }
 
     struct filedesc* fd = get_fd(i);
 
@@ -524,7 +555,7 @@ ufs_read(int i, char *buf, size_t size)
 int
 ufs_close(int fd)
 {
-    printf("\n======== CLOSE: %d\n", fd);
+//    printf("\n======== CLOSE: %d\n", fd);
 	/* IMPLEMENT THIS FUNCTION */
 //	(void)fd;
 
@@ -537,7 +568,7 @@ ufs_close(int fd)
 int
 ufs_delete(const char *filename)
 {
-    printf("\n======== DELETE: %s\n", filename);
+//    printf("\n======== DELETE: %s\n", filename);
 	/* IMPLEMENT THIS FUNCTION */
 //	(void)filename;
 //	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
@@ -557,6 +588,7 @@ ufs_delete(const char *filename)
 void
 ufs_destroy(void)
 {
+    
 }
 
 
