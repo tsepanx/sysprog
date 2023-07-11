@@ -19,7 +19,7 @@ static enum ufs_error_code ufs_error_code = UFS_ERR_NO_ERR;
 
 struct block {
 	/** Block memory. */
-//	char *memory;
+	char *memory;
 	/** How many bytes are occupied. */
 	int occupied;
 	/** Next block in the file. */
@@ -29,7 +29,7 @@ struct block {
 
 	/* PUT HERE OTHER MEMBERS */
     int i;
-    char** file_memory_ptr;
+//    char** file_memory_ptr;
 };
 
 struct file {
@@ -49,8 +49,8 @@ struct file {
 	struct file *prev;
 
 	/* PUT HERE OTHER MEMBERS */
-    int blocks_count;
-    char* memory_ptr;
+//    int blocks_count;
+//    char* memory_ptr;
 };
 
 /** List of all files. */
@@ -77,15 +77,15 @@ static struct filedesc **file_descriptors = NULL;
 static int file_descriptor_count = 0;
 static int file_descriptor_capacity = 0;
 
-char* get_memory(struct block* b) {
-    char* res = *(b->file_memory_ptr) + (b->i * BLOCK_SIZE);
-    return res;
-}
+//char* get_memory(struct block* b) {
+//    char* res = *(b->file_memory_ptr) + (b->i * BLOCK_SIZE);
+//    return res;
+//}
 
 void print_block(struct block* b) {
     printf("    -BLOCK-: %p\n", b);
     printf("        %p <-prev next-> %p\n", b->prev, b->next);
-    printf("        MEM: %d, '%.512s'\n", b->occupied, get_memory(b));
+    printf("        MEM: %d, '%.512s'\n", b->occupied, b->memory);
 }
 
 void print_file(struct file* f) {
@@ -132,11 +132,11 @@ void print_debug() {
     printf("============================================ ||| ===============================================\n");
 }
 
-struct block* init_block(struct block* prev, struct block* next, char** file_memory_ptr, int i) {
+struct block* init_block(struct block* prev, struct block* next, int i) {
     struct block* b = malloc(sizeof(struct block));
-//    b->memory = calloc(BLOCK_SIZE, sizeof(char));
+    b->memory = calloc(BLOCK_SIZE, sizeof(char));
 //    b->memory = file_memory_ptr;
-    b->file_memory_ptr = file_memory_ptr;
+//    b->file_memory_ptr = file_memory_ptr;
     b->occupied = 0;
     b->next = next;
     b->prev = prev;
@@ -150,10 +150,10 @@ struct file* init_file(const char* filename, struct file* prev, struct file* nex
     f->name = calloc(strlen(filename), sizeof(char));
     strcpy(f->name, filename);
 
-    f->blocks_count = 1;
-    f->memory_ptr = malloc(1 * BLOCK_SIZE * sizeof(char));
+//    f->blocks_count = 1;
+//    f->memory_ptr = malloc(1 * BLOCK_SIZE * sizeof(char));
 
-    struct block* b = init_block(NULL, NULL, &f->memory_ptr, 0);
+    struct block* b = init_block(NULL, NULL, 0);
     f->block_list = b;
     f->last_block = b;
     f->prev = prev;
@@ -191,7 +191,7 @@ int get_size(struct file* f) {
 }
 
 void free_block(struct block* b) {
-//    free(b->memory);
+    free(b->memory);
     free(b);
 }
 
@@ -207,7 +207,7 @@ void free_file(struct file* f) {
         i++;
     }
     free(f->name);
-    free(f->memory_ptr);
+//    free(f->memory_ptr);
     free(f);
 }
 
@@ -217,26 +217,27 @@ void free_file_desc(struct filedesc* fd) {
 }
 
 void add_block(struct file* f) {
-    f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count + 1) * BLOCK_SIZE);
-
-    struct block* b = init_block(f->last_block, NULL, &f->memory_ptr, f->blocks_count);
-    f->blocks_count++;
+//    f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count + 1) * BLOCK_SIZE);
+//
+//    struct block* b = init_block(f->last_block, NULL, &f->memory_ptr, f->blocks_count);
+//    f->blocks_count++;
+    struct block* b = init_block(f->last_block, NULL, f->last_block->i + 1);
 
     f->last_block->next = b;
     f->last_block = b;
 }
 
 void remove_block(struct file* f) {
-    assert(f->blocks_count > 1);
+//    assert(f->blocks_count > 1);
 
-    f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count - 1) * BLOCK_SIZE);
+//    f->memory_ptr = realloc(f->memory_ptr, (f->blocks_count - 1) * BLOCK_SIZE);
 
     struct block* new_last_b = f->last_block->prev;
     new_last_b->next = NULL;
     free_block(f->last_block);
     f->last_block = new_last_b;
 
-    f->blocks_count--;
+//    f->blocks_count--;
 }
 
 void add_file_to_list(struct file* f, struct file** flist_ptr) {
@@ -403,9 +404,10 @@ int write_to_fd(struct filedesc* fd, const char* buf, int size) {
             fd->ptr_block_offset = 0;
         }
 
-        char* b_mem = get_memory(b_cur);
+//        char* b_mem = get_memory(b_cur);
 
-        b_mem[fd->ptr_block_offset] = *c; // WRITING CHAR
+//        b_mem[fd->ptr_block_offset] = *c; // WRITING CHAR
+        b_cur->memory[fd->ptr_block_offset] = *c; // WRITING CHAR
         result_written++;
         filesize++;
 
@@ -429,7 +431,8 @@ int truncate_from_fd(struct filedesc* fd, int size) {
 //    struct block* b_cur = get_block_by_i(f, fd->ptr_block_i);
 
     struct block* b_cur = f->last_block;
-    fd->ptr_block_i = f->blocks_count - 1;
+//    fd->ptr_block_i = f->blocks_count - 1;
+    fd->ptr_block_i = f->last_block->i;
     fd->ptr_block_offset = b_cur->occupied;
 
     while (result_trunc < size) {
@@ -442,7 +445,7 @@ int truncate_from_fd(struct filedesc* fd, int size) {
 
         if (fd->ptr_block_offset == 0) { // ->START OF CUR BLOCK
             if (b_cur->prev == NULL) { // REACHED START OF FILE
-                assert(f->blocks_count == 1);
+//                assert(f->blocks_count == 1);
                 break;
             }
             fd->ptr_block_i--;
@@ -452,9 +455,10 @@ int truncate_from_fd(struct filedesc* fd, int size) {
             b_cur = f->last_block;
         }
 
-        char* b_mem = get_memory(b_cur);
+//        char* b_mem = get_memory(b_cur);
 
-        b_mem[fd->ptr_block_offset - 1] = '\0'; // TRUNCATING CHAR
+//        b_mem[fd->ptr_block_offset - 1] = '\0'; // TRUNCATING CHAR
+        b_cur->memory[fd->ptr_block_offset - 1] = '\0';
         result_trunc++;
         filesize--;
         fd->ptr_block_offset--;
@@ -494,7 +498,8 @@ int read_from_fd(struct filedesc* fd, char* out_buf, int n) {
             }
         }
 
-        out_buf[result_read] = get_memory(b_cur)[fd->ptr_block_offset]; // READING CHAR
+//        out_buf[result_read] = get_memory(b_cur)[fd->ptr_block_offset]; // READING CHAR
+        out_buf[result_read] = b_cur->memory[fd->ptr_block_offset]; // READING CHAR
         result_read++;
 
         fd->ptr_block_offset++;
