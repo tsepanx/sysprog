@@ -573,7 +573,7 @@ ufs_open(const char *filename, int flags)
         } else {
             res_file = existing_file;
         }
-    } else if (flags != -1) {        // OPEN EXISTING
+    } else {        // OPEN EXISTING
         if (existing_file == NULL) {
             ufs_error_code = UFS_ERR_NO_FILE;
             return -1;
