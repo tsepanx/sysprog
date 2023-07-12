@@ -680,9 +680,11 @@ ufs_destroy(void)
     struct file* fi = file_list;
     while (fi != NULL) {
 //        printf("FREEING FILE: %s\n", fi->name);
+
+        struct file* fi_next = fi->next;
         free_file(fi);
 
-        fi = fi->next;
+        fi = fi_next;
     }
 
     int i = 0;
